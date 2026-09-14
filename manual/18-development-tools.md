@@ -51,6 +51,8 @@ Upgrades from Docker retain this layer to preserve existing scripts and satisfy 
 
 With compatibility installed, Docker SDK clients in the desktop session use the rootless socket through `DOCKER_HOST`. An explicitly configured endpoint is preserved. For an SSH session or a tool with its own environment, set `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock` as needed. Native CLI and Quadlet operations do not require this compatibility API; TUI, Desktop, and API clients use the socket-activated Podman service.
 
+Projects that mount `/var/run/docker.sock` need a separate configuration change: use `${XDG_RUNTIME_DIR}/podman/podman.sock` as the host source while retaining the container's expected socket path. `DOCKER_HOST` does not rewrite Compose mounts. Grant socket access only to trusted applications; it permits control of your containers and access as your account. Verify the application's container-management operations as well as its health checks, since engine API requirements can still differ.
+
 
 ## GitHub CLI
 
