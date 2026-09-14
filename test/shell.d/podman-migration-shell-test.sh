@@ -81,6 +81,9 @@ esac
     transfer = next(i for i, c in enumerate(calls) if c.startswith('python3|') and 'migrate-databases.py' in c and '--check' not in c)
     assert transfer < swap, calls
     assert any(c.startswith('podman|') and '|/run/user/1000|unix:path=/run/user/1000/bus' in c for c in calls)
+    assert any(c.startswith('omarchy-pkg-add|podman docker-compose podman-compose|') for c in calls), calls
+    assert not any('docker-compose' in c.split('|')[1].split() for c in calls if c.startswith('omarchy-pkg-drop|')), calls
+    print('ok - migration installs and retains Docker Compose for the Podman backend')
     print('ok - migration restores the local user environment, refuses a missing bus before changes and swaps the Docker provider after transfer')
 
     result, calls = run(migration, TEST_UFW='missing')
@@ -103,7 +106,7 @@ esac
         assert result.returncode == 0, result.stderr
         install = next(c.split('|')[1].split() for c in calls if c.startswith('pacman|-Syu '))
         assert 'podman-docker' not in install, (engine, install)
-        assert 'podman' in install and 'podman-compose' in install, install
+        assert {'podman', 'docker-compose', 'podman-compose'} <= set(install), install
     print('ok - package repair retains all real Docker providers while migration is pending')
     result, calls = run(migration, TEST_ENGINE='missing')
     assert result.returncode == 0, (result.stdout, result.stderr)

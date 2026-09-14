@@ -34,7 +34,7 @@ fi
 # Validate existing grants and allocate safe ranges before any engine work.
 sudo python3 "$OMARCHY_PATH/default/podman/allocate-subids.py" "$USER"
 
-omarchy-pkg-add podman podman-compose
+omarchy-pkg-add podman docker-compose podman-compose
 if [[ ! -f $HOME/.local/state/omarchy/preinstalls-removed ]]; then
   omarchy-pkg-add podman-desktop podman-tui
 fi
@@ -138,7 +138,7 @@ fi
 # after they have deliberately removed the shim.
 if [[ -n $docker_provider ]]; then
   sudo pacman -S --needed --noconfirm --ask 4 podman-docker
-  omarchy-pkg-drop docker-buildx docker-compose ufw-docker lazydocker lazydocker-bin
+  omarchy-pkg-drop docker-buildx ufw-docker lazydocker lazydocker-bin
 fi
 
 # Retired package config may be a .pacsave after the package transaction. Keep

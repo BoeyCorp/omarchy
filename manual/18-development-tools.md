@@ -20,7 +20,7 @@ To install, say, Ruby, you'd run `mise use -g ruby`, which will both install Rub
 
 ## Podman
 
-[Podman](https://podman.io/) runs containers without a root daemon. Use `podman run`, `podman build`, and `podman compose up`; the `d` alias also runs Podman. Compose uses the installed Podman Compose provider. Press `Super + Shift + D` for [Podman TUI](https://github.com/containers/podman-tui), the terminal interface for containers, pods, images, volumes, and networks. You can also launch it with `omarchy launch podman-tui`. [Podman Desktop](https://podman-desktop.io/) remains available from the application launcher or `omarchy launch podman` for graphical management.
+[Podman](https://podman.io/) runs containers without a root daemon. Use `podman run`, `podman build`, and `podman compose up`; the `d` alias also runs Podman. Compose uses Docker Compose with the rootless Podman backend by default, without installing Docker Engine. Explicit provider overrides in `containers.conf` or `PODMAN_COMPOSE_PROVIDER` are respected. The authenticated Windows helper uses Podman Compose separately. Press `Super + Shift + D` for [Podman TUI](https://github.com/containers/podman-tui), the terminal interface for containers, pods, images, volumes, and networks. You can also launch it with `omarchy launch podman-tui`. [Podman Desktop](https://podman-desktop.io/) remains available from the application launcher or `omarchy launch podman` for graphical management.
 
 Development containers run as your user. You do not need sudo or membership in a privileged group. Container images and volumes belong to your account; `sudo podman` has a separate store. The Windows VM uses that root-owned store and asks for authorization when needed.
 
@@ -45,7 +45,7 @@ The installer preserves existing definitions, containers, and volumes and refuse
 
 ### Docker compatibility
 
-Omarchy's container commands and database services use Podman directly. Fresh installations do not include the `docker` command. Add it from _Install > Development > Docker Compatibility_ or with `omarchy install docker-compat`. The optional `podman-docker` package provides commands such as `docker ps`, `docker build`, and `docker compose up`. Docker Engine is not installed; compatibility follows Podman's supported commands and Compose options. The installer refuses to replace an existing Docker engine before migration.
+Omarchy's container commands and database services use Podman directly. Fresh installations do not include the `docker` command. Add it from _Install > Development > Docker Compatibility_ or with `omarchy install docker-compat`. The optional `podman-docker` package provides commands such as `docker ps`, `docker build`, and `docker compose up`. Docker Engine is not installed; the command shim follows Podman's supported commands, while Compose uses the same Docker Compose provider as `podman compose`. The installer refuses to replace an existing Docker engine before migration.
 
 Upgrades from Docker retain this layer to preserve existing scripts and satisfy installed packages that depend on `docker`. To remove it, run `omarchy remove docker-compat`; package dependencies may require keeping it. Native Podman and its containers remain available. Log out and back in after changing compatibility to refresh terminal and application environments.
 
@@ -66,7 +66,7 @@ During the update, Omarchy moves compatible unprivileged containers, including i
 
 Ordinary containers can migrate automatically regardless of their name or image when they use the default bridge, localhost ports, private local volumes and supported resource limits. Simple named volumes retain their names; CPU, memory, PID and shared-memory limits and restrictive security settings are preserved and checked before the application starts.
 
-Privileged containers, GPUs and other devices, host-directory or socket mounts, custom networks, shared volumes and unsupported settings need an explicit transfer using the project's own configuration. The migration identifies these before stopping workloads and stays pending until they are moved. Back up the application data, recreate the project using `podman-compose`, verify its data and behavior, then remove the old Docker containers and retry the update. Docker is removed only after the remaining workloads have moved successfully.
+Privileged containers, GPUs and other devices, host-directory or socket mounts, custom networks, shared volumes and unsupported settings need an explicit transfer using the project's own configuration. The migration identifies these before stopping workloads and stays pending until they are moved. Back up the application data, recreate the project using `podman compose`, verify its data and behavior, then remove the old Docker containers and retry the update. Docker is removed only after the remaining workloads have moved successfully.
 
 The automatic transfer stays rootless and uses only the local engines. It never silently retries with sudo, grants additional capabilities, disables confinement or weakens host permissions to make a container start. It does not transfer every cached image, unused volume, GPU worker, CI runner, or persistent BuildKit builder. A familiar database name does not make a custom configuration safe to migrate automatically.
 

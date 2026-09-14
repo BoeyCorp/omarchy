@@ -20,6 +20,7 @@ cups
 cups-filters
 cups-pk-helper
 ddcutil
+docker-compose
 podman
 podman-compose
 podman-desktop

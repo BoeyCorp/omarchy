@@ -125,7 +125,7 @@ grep -q 'sudo python3 .*migrate-windows.py --stop tester' "$TEST_LOG" || fail "W
 grep -q 'sudo systemctl disable --now docker.socket docker.service' "$TEST_LOG" || fail "old engine stays enabled"
 grep -q '^omarchy-state set reboot-required$' "$TEST_LOG" || fail "retired engine runtime did not flag a reboot"
 ! grep -q 'docker rm\|podman rm\|docker volume rm' "$TEST_LOG" || fail "handover deletes existing data"
-grep -q '^omarchy-pkg-drop docker-buildx docker-compose ufw-docker lazydocker lazydocker-bin$' "$TEST_LOG" ||
+grep -q '^omarchy-pkg-drop docker-buildx ufw-docker lazydocker lazydocker-bin$' "$TEST_LOG" ||
   fail "retired Docker tools remain"
 engine_stopped=$(grep -n '^sudo systemctl disable --now docker.socket docker.service$' "$TEST_LOG" | cut -d: -f1)
 shim_installed=$(grep -n '^sudo pacman -S --needed --noconfirm --ask 4 podman-docker$' "$TEST_LOG" | cut -d: -f1)

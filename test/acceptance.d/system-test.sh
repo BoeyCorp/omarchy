@@ -72,7 +72,17 @@ verify_services() {
 verify_runtime_tools() {
   [[ $(timeout 10 podman info --format '{{.Host.Security.Rootless}}') == true ]] ||
     fail "Podman runs rootless for the desktop user"
-  podman-compose --version >/dev/null || fail "Podman Compose is installed"
+  podman-compose --version >/dev/null || fail "Podman Compose is installed for Windows"
+  [[ $(timeout 10 podman compose version) == "Docker Compose version "* ]] ||
+    fail "Docker Compose is the default Podman Compose provider"
+  OMARCHY_COMPOSE_CHECK=ready timeout 10 podman compose --env-file /dev/null -f - config --environment <<'YAML' |
+services:
+  check:
+    image: docker.io/library/alpine:3
+    environment:
+      CHECK: ${OMARCHY_COMPOSE_CHECK:?Compose interpolation must work}
+YAML
+    grep -x 'OMARCHY_COMPOSE_CHECK=ready' >/dev/null || fail "Compose supports environment validation"
   podman-tui version >/dev/null || fail "Podman TUI is installed"
   systemctl --user is-enabled --quiet podman.socket podman-restart.service ||
     fail "Podman user services are enabled"
