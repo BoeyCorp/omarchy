@@ -79,6 +79,9 @@ for name in omarchy-pkg-add omarchy-pkg-drop systemctl podman omarchy-state dbus
   cat >"$test_dir/bin/$name" <<'SH'
 #!/bin/bash
 printf '%s %s\n' "${0##*/}" "$*" >>"$TEST_LOG"
+if [[ ${0##*/} == "systemctl" && $* == *"once-background.service"* ]]; then
+  exit 1
+fi
 SH
 done
 chmod +x "$test_dir/bin"/*
