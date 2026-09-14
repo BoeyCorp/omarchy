@@ -26,6 +26,7 @@ case "$name" in
   id)
     case "$1" in -u) echo 1000;; -nG) echo users;; *) exit 92;; esac ;;
   systemctl)
+    if [[ $* == *once-background.service ]]; then exit 1; fi
     if [[ $* == '--user show-environment' ]]; then
       [[ ${XDG_RUNTIME_DIR:-} == /run/user/1000 && ${DBUS_SESSION_BUS_ADDRESS:-} == unix:path=/run/user/1000/bus ]] || exit 93
       [[ $TEST_BUS == available ]] || exit 1
@@ -117,7 +118,7 @@ esac
     for engine in ('docker', 'docker-git', 'podman-docker', 'missing'):
         result, calls = run(migration, TEST_ENGINE=engine, TEST_ONCE='installed')
         assert result.returncode != 0, (engine, result.stdout, result.stderr)
-        assert 'ONCE is installed' in result.stderr, result.stderr
+        assert 'Legacy ONCE' in result.stderr, result.stderr
         assert not any(c.startswith(('sudo|', 'podman|', 'docker|', 'omarchy-pkg-add|', 'omarchy-pkg-drop|')) for c in calls), calls
     print('ok - ONCE keeps migration pending before identity, package or engine changes')
 
