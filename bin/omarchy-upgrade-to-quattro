@@ -1270,6 +1270,11 @@ enable_system_service() {
   as_root systemctl enable "$unit" >/dev/null 2>&1 || warn "Could not enable $unit; it may not be installed on this system."
 }
 
+enable_global_user_service() {
+  local unit="$1"
+  as_root systemctl --global enable "$unit" >/dev/null 2>&1 || warn "Could not enable user unit $unit; it may not be installed on this system."
+}
+
 apply_firewall_defaults() {
   # Run the packaged config script rather than a copy of it, the same way
   # configure_snapper_policy and configure_lock_authentication already do. The
@@ -1362,7 +1367,8 @@ EOF
   enable_system_service cups.service
   enable_system_service avahi-daemon.service
   enable_system_service linux-modules-cleanup.service
-  as_root systemctl --global enable podman.socket podman-restart.service
+  enable_global_user_service podman.socket
+  enable_global_user_service podman-restart.service
   enable_system_service systemd-resolved.service
   # NetworkManager replaces iwd, and both halves of that swap belong in one
   # step: a machine that boots with both enabled has two daemons fighting over
