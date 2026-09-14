@@ -121,21 +121,6 @@ esac
         assert not any(c.startswith(('sudo|', 'podman|', 'docker|', 'omarchy-pkg-add|', 'omarchy-pkg-drop|')) for c in calls), calls
     print('ok - ONCE keeps migration pending before identity, package or engine changes')
 
-    once = root / 'bin/omarchy-install-service-once'
-    for engine in ('podman-docker', 'missing', 'broken'):
-        result, calls = run(once, TEST_ENGINE=engine)
-        assert result.returncode != 0, (engine, result.stdout, result.stderr)
-        assert not any(c.startswith(('sudo|', 'omarchy-pkg-add|')) for c in calls), calls
-    for engine in ('docker', 'docker-git'):
-        # Stub the interactive TUI too: it must never launch on this host.
-        (stubs / 'once').write_text('#!/bin/bash\nexit 0\n')
-        (stubs / 'once').chmod(0o755)
-        result, calls = run(once, TEST_ENGINE=engine)
-        assert result.returncode == 0, (engine, result.stderr, calls)
-        socket = next(i for i,c in enumerate(calls) if c.startswith('sudo|systemctl start docker.socket|'))
-        service = next(i for i,c in enumerate(calls) if c.startswith('sudo|systemctl enable --now once-background.service|'))
-        assert socket < service, calls
-    print('ok - ONCE rejects Podman before installing and uses the existing Docker socket when available')
     for path in (migration, repair):
         result, calls = run(path, TEST_ENGINE='broken')
         assert result.returncode != 0, (path, 'failed package query treated as no engine')

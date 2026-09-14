@@ -21,11 +21,11 @@ if ! docker_provider=$(pacman -Qq docker 2>/dev/null); then
   docker_provider=""
 fi
 
-# ONCE's root system service uses Docker's API. Neither the user socket nor
-# the CLI compatibility package provides a supported replacement for it.
+# Existing ONCE deployments need their own verified backup/restore migration.
+# New rootless installations do not move the legacy manager or application data.
 if pacman -Qq once-bin >/dev/null 2>&1; then
-  echo "ONCE is installed and still requires Docker Engine. Podman migration remains pending." >&2
-  echo "Keep Docker for ONCE, or retire ONCE and its workloads before retrying." >&2
+  echo "ONCE is installed. Export and verify its applications before migrating engines." >&2
+  echo "The existing ONCE service and Docker data were left unchanged; migration remains pending." >&2
   exit 1
 else
   pacman -Qq >/dev/null

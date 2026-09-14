@@ -1,24 +1,30 @@
 #!/bin/bash
 
-# omarchy:summary=Install the ONCE service, enable its background service, and launch the TUI.
+# omarchy:summary=Install ONCE with a rootless user service and launch its TUI
 # omarchy:requires-sudo=true
 
 set -euo pipefail
 
-# ONCE uses Docker's API from a root system service. The optional Podman CLI
-# shim and desktop user's API socket do not satisfy that integration.
-if ! docker_provider=$(pacman -Qq docker 2>/dev/null) || [[ $docker_provider == "podman-docker" ]]; then
-  echo "ONCE currently requires Docker Engine; its Podman integration is not supported." >&2
-  echo "No packages or services have been changed." >&2
+if (( EUID == 0 )); then
+  echo "Run this command as your desktop user, without sudo." >&2
   exit 1
 fi
 
-echo "Installing ONCE..."
-omarchy-pkg-add once-bin
+# Never start a second manager while the legacy system service owns the apps.
+if systemctl is-active --quiet once-background.service || systemctl is-enabled --quiet once-background.service; then
+  echo "An existing rootful ONCE service needs an explicit backup/restore migration." >&2
+  echo "Its service and application data were left unchanged." >&2
+  exit 1
+fi
 
-echo "Enabling ONCE background service..."
-sudo systemctl start docker.socket
-sudo systemctl enable --now once-background.service
+systemctl --user show-environment >/dev/null
+omarchy-pkg-add once
+systemctl --user daemon-reload
+omarchy-launch-once list
+systemctl --user enable podman-restart.service
+sudo loginctl enable-linger "$(id -un)"
+systemctl --user enable --now omarchy-once.service
 
-echo -e "\nLaunching ONCE..."
-sudo once
+echo "ONCE runs as your user. Local apps use http://<app>.localhost:8080."
+echo "Existing ONCE namespaces and rootful application data are not moved by this installer."
+omarchy-launch-once
