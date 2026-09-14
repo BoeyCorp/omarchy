@@ -5,6 +5,7 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 python3 - "$ROOT" <<'PY'
 import importlib.util
+import json
 import os
 from pathlib import Path
 import stat
@@ -76,11 +77,21 @@ print('ok - root, an unpatched binary, foreign sockets and rootful engines canno
 with tempfile.TemporaryDirectory() as directory:
     directory = Path(directory)
     log = directory / 'calls'
-    for name in ('systemctl', 'sudo', 'omarchy-pkg-add', 'omarchy-launch-once'):
+    for name in ('systemctl', 'sudo', 'pacman', 'omarchy-pkg-add', 'omarchy-launch-once'):
         script = directory / name
         script.write_text('''#!/bin/bash
 echo "${0##*/}|$*" >> "$TEST_LOG"
-if [[ ${0##*/} == systemctl && $1 != --user ]]; then
+if [[ ${0##*/} == pacman ]]; then
+  [[ ${TEST_ONCE_PROVIDER:-missing} != broken ]] || exit 1
+  if [[ $* == "-Qq once" ]]; then
+    [[ ${TEST_ONCE_PROVIDER:-missing} != missing ]] || exit 1
+    echo "$TEST_ONCE_PROVIDER"
+  elif [[ $* != "-Qq" ]]; then
+    exit 2
+  fi
+elif [[ ${0##*/} == systemctl && $* == "--user is-enabled --quiet omarchy-once.service" ]]; then
+  [[ ${TEST_ONCE_ENABLED:-0} == 1 ]]
+elif [[ ${0##*/} == systemctl && $1 != --user ]]; then
   [[ ${TEST_LEGACY:-none} == "$1" ]]
 elif [[ ${0##*/} == omarchy-launch-once && ${TEST_FAIL_LAUNCH:-0} == 1 ]]; then
   exit 1
@@ -96,6 +107,18 @@ fi
         result, calls = install(TEST_LEGACY=state)
         assert result.returncode != 0, result
         assert not any(call.startswith(('sudo|', 'omarchy-pkg-add|', 'omarchy-launch-once|')) for call in calls), calls
+    for provider in ('once-bin', 'once-custom', 'broken'):
+        result, calls = install(TEST_ONCE_PROVIDER=provider)
+        assert result.returncode != 0, (provider, result)
+        assert not any(call.startswith(('sudo|', 'omarchy-pkg-add|', 'omarchy-launch-once|', 'systemctl|--user')) for call in calls), calls
+        if provider == 'broken':
+            assert 'Cannot verify' in result.stderr, result.stderr
+        else:
+            assert 'backup/restore migration' in result.stderr, result.stderr
+    for provider in ('once', 'missing'):
+        result, calls = install(TEST_ONCE_PROVIDER=provider)
+        assert result.returncode == 0, (provider, result.stderr, calls)
+        assert calls.index('pacman|-Qq once') < calls.index('omarchy-pkg-add|once'), calls
     result, calls = install(TEST_FAIL_LAUNCH='1')
     assert result.returncode != 0
     assert not any('enable --now' in call or call.startswith('sudo|') for call in calls), calls
@@ -104,5 +127,15 @@ fi
     assert 'omarchy-pkg-add|once' in calls
     assert calls.index('omarchy-launch-once|list') < calls.index('systemctl|--user enable --now omarchy-once.service')
     assert not any('sudo|once' in call or 'docker.socket' in call for call in calls), calls
+    menu_line = next(line for line in (root / 'default/omarchy/omarchy-menu.jsonc').read_text().splitlines()
+                     if '"install.service.once":' in line)
+    menu = json.loads('{' + menu_line.strip().rstrip(',') + '}')['install.service.once']
+    for enabled in ('0', '1'):
+        result = subprocess.run(['bash', '-c', menu['disabled']],
+                                env=dict(os.environ, PATH=f'{directory}:/usr/bin', TEST_LOG=str(log), TEST_ONCE_ENABLED=enabled),
+                                capture_output=True, text=True)
+        assert (result.returncode == 0) == (enabled == '1'), result
+print('ok - ONCE setup remains available from the menu until its user service is enabled')
 print('ok - installer preserves legacy services, validates startup, and enables only user background tasks')
+print('ok - installer accepts only the source ONCE package or an absent package, preserving foreign providers and refusing database failures')
 PY
