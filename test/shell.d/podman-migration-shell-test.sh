@@ -39,6 +39,7 @@ case "$name" in
       systemctl|docker|ufw|pacman|env|once) exec "$@";;
       *) exit 94;;
     esac ;;
+  omarchy-update-pacman) exec pacman "$@" ;;
   pacman)
     [[ $TEST_ENGINE != broken ]] || exit 2
     if [[ $* == '-Qq once-bin' ]]; then
@@ -57,7 +58,7 @@ esac
 '''
     for name in ('id', 'sudo', 'systemctl', 'pacman', 'python3', 'docker', 'podman', 'ufw',
                  'omarchy-pkg-add', 'omarchy-pkg-drop', 'omarchy-state',
-                 'dbus-update-activation-environment', 'omarchy-refresh-pacman', 'omarchy-cmd-present'):
+                 'dbus-update-activation-environment', 'omarchy-refresh-pacman', 'omarchy-update-pacman', 'omarchy-cmd-present'):
         path = stubs / name
         path.write_text(stub)
         path.chmod(0o755)
