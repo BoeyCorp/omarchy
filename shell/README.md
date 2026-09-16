@@ -143,8 +143,9 @@ You can still drop a plugin in without git:
 ### Packaged plugins
 
 Some default plugins ship as their own Arch package rather than in this
-checkout: Atreyu (`omarchy.atreyu`) is the `atreyu` package. pacman installs
-such a plugin, root-owned, at `/usr/share/omarchy/plugins/<plugin-id>/`, and
+checkout: Atreyu (`omarchy.atreyu`) is the `atreyu` package, and Elsewhen
+(`omacom.elsewhen`) the `elsewhen` package. pacman installs such a plugin,
+root-owned, at `/usr/share/omarchy/plugins/<plugin-id>/`, and
 the shell scans that root between its bundled plugins and the user's. A
 packaged `omarchy.*` id is trusted exactly like a bundled one; a packaged
 plugin under any other id is treated like a user plugin. They update with
@@ -237,7 +238,7 @@ customization from the shipped defaults lives in it.
 |-----------------------------------|----------------|--------------------------------------------------------|
 | `~/.config/omarchy/shell.json`    | the shell      | full layout + per-entry settings + enabled plugin list |
 | `~/.config/omarchy/plugins/<id>/` | user           | drop-in third-party plugin source files                |
-| `/usr/share/omarchy/plugins/<id>/` | pacman        | packaged plugins (e.g. `atreyu`), updated by `omarchy update` |
+| `/usr/share/omarchy/plugins/<id>/` | pacman        | packaged plugins (e.g. `atreyu`, `elsewhen`), updated by `omarchy update` |
 
 The `config/omarchy/shell.json` default config describes the
 fresh-install state. When the user has no `shell.json`, the shell uses

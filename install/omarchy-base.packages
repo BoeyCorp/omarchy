@@ -27,6 +27,7 @@ docker-compose
 dosfstools
 dotnet-runtime
 dua-cli
+elsewhen
 evince
 exfatprogs
 expac

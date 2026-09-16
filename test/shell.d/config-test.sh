@@ -41,12 +41,13 @@ pass "default clock date format has no leading zero"
 jq -e '
   def ids: map(.id // .);
   (.bar.layout.right | ids) as $ids |
+  ($ids | index("omacom.elsewhen")) as $elsewhen |
   ($ids | index("omarchy.tray")) as $tray |
   ($ids | index("omarchy.atreyu")) as $atreyu |
   ($ids | index("omarchy.agents")) as $agents |
-  $tray != null and $atreyu == $tray + 1 and $agents == $atreyu + 1
+  $elsewhen == 0 and $tray == 1 and $atreyu == $tray + 1 and $agents == $atreyu + 1
 ' "$ROOT/config/omarchy/shell.json" >/dev/null
-pass "default right layout keeps atreyu and agents next to the tray"
+pass "default right layout opens with elsewhen and the tray, then atreyu and agents"
 
 ROOT="$ROOT" python3 <<'PY'
 import json

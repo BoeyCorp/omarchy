@@ -32,6 +32,7 @@ like the plugins here, and a copy in this directory shadows the packaged one.
 | Tailscale     | `omarchy.tailscale`       | `bar-widget`            | `panels/tailscale/Panel.qml`          |
 | Agents   | `omarchy.agents`     | `bar-widget`            | `agents/Panel.qml`               |
 | Atreyu        | `omarchy.atreyu`          | `bar-widget`, `overlay` | packaged: `atreyu` installs `/usr/share/omarchy/plugins/omarchy.atreyu/` |
+| Elsewhen      | `omacom.elsewhen`         | `bar-widget`            | packaged: `elsewhen` installs `/usr/share/omarchy/plugins/omacom.elsewhen/` |
 | Weather       | `omarchy.weather`         | `bar-widget`            | `panels/weather/BarWidget.qml`        |
 | Media         | `omarchy.media`           | `service`, `bar-widget` | `services/media/Service.qml`, `services/media/BarWidget.qml` |
 | Battery       | `omarchy.battery`         | `service`               | `services/battery/Service.qml`        |

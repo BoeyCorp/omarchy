@@ -91,8 +91,9 @@ The lower-level IPC methods remain available through `omarchy-shell shell ...`.
 ## Packaged plugins
 
 A default plugin can ship as its own Arch package instead of in the Omarchy
-checkout: Atreyu (`omarchy.atreyu`) is the `atreyu` package. pacman installs it
-at `/usr/share/omarchy/plugins/<id>/`, a root the shell scans between
+checkout: Atreyu (`omarchy.atreyu`) is the `atreyu` package, and Elsewhen
+(`omacom.elsewhen`) the `elsewhen` package. pacman installs them at
+`/usr/share/omarchy/plugins/<id>/`, a root the shell scans between
 `$OMARCHY_PATH/shell/plugins` and `~/.config/omarchy/plugins`. A packaged
 `omarchy.*` id is trusted like a bundled plugin and loads by default; any other
 packaged id behaves like an installed plugin. Precedence is bundled, then
