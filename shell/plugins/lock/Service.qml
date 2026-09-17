@@ -47,6 +47,10 @@ Item {
   property bool faceMatched: false
   property bool faceConfigured: false
   property int faceUnlockDelayMs: 4000
+  property bool laptopClosed: false
+  property int faceAttemptCount: 0
+  readonly property int faceMaxAttempts: 2
+  property bool facePaused: faceAttemptCount >= faceMaxAttempts
 
   readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
   readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating
@@ -141,6 +145,7 @@ Item {
     faceSuccessTimer.stop()
     faceDelayActive = false
     faceMatched = false
+    faceAttemptCount = 0
     if (passwordPam.active) passwordPam.abort()
     if (fingerprintPam.active) fingerprintPam.abort()
   }
@@ -152,6 +157,7 @@ Item {
     }
 
     if (!delayReadProc.running) delayReadProc.running = true
+    if (!laptopClosedProc.running) laptopClosedProc.running = true
     resetAuthenticationState()
     lockRequested = true
     armBlankTimer()
@@ -256,7 +262,7 @@ Item {
   }
 
   function startFingerprint() {
-    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured)) return
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed) return
     if (fingerprintPam.active || fingerprintAuthenticating) return
 
     fingerprintAuthenticating = true
@@ -272,13 +278,28 @@ Item {
     if (result === PamResult.Success) {
       if (root.faceConfigured) {
         faceMatched = true
+        faceAttemptCount = 0
+        if (!chimeProc.running) chimeProc.running = true
         faceSuccessTimer.restart()
       } else {
         finishUnlock()
       }
     } else if (fingerprintConfigured || faceConfigured) {
-      fingerprintRetryTimer.restart()
+      faceAttemptCount += 1
+      if (faceAttemptCount < faceMaxAttempts && !laptopClosed) {
+        fingerprintRetryTimer.restart()
+      } else {
+        fingerprintRetryTimer.stop()
+      }
     }
+  }
+
+  function requestFaceRescan() {
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed) return
+    faceAttemptCount = 0
+    faceDelayActive = false
+    if (!laptopClosedProc.running) laptopClosedProc.running = true
+    startFingerprint()
   }
 
   WlSessionLock {
@@ -336,6 +357,7 @@ Item {
         faceScanning: root.faceScanning
         faceDelayActive: root.faceDelayActive
         faceMatched: root.faceMatched
+        facePaused: root.facePaused
         authenticatingPassword: root.authenticatingPassword
         failureMessage: root.failureMessage
         failedAttempts: root.failedAttempts
@@ -346,6 +368,7 @@ Item {
         passwordText: root.enteredPassword
         onPasswordTextEdited: function(password) { root.enteredPassword = password }
         onSubmitPassword: function(password) { root.submitPassword(password) }
+        onRescanRequested: root.requestFaceRescan()
         onClearFailureRequested: root.failureMessage = ""
         onWakeRequested: root.runWake()
       }
@@ -462,6 +485,23 @@ Item {
     interval: 350
     repeat: false
     onTriggered: root.finishUnlock()
+  }
+
+  Process {
+    id: laptopClosedProc
+    command: ["bash", "-c", "omarchy-hw-laptop-closed && echo closed || echo open"]
+    stdout: StdioCollector {
+      id: laptopClosedStdout
+      waitForEnd: true
+    }
+    onExited: {
+      root.laptopClosed = String(laptopClosedStdout.text || "").trim() === "closed"
+    }
+  }
+
+  Process {
+    id: chimeProc
+    command: ["bash", "-c", "if [[ -f \"$HOME/.config/omarchy/sounds/face-match.wav\" && \"$(cat \"$HOME/.config/omarchy/face-unlock-sound\" 2>/dev/null)\" != \"off\" ]]; then pw-play \"$HOME/.config/omarchy/sounds/face-match.wav\" >/dev/null 2>&1; fi"]
   }
 
   Process {

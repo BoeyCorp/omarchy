@@ -14,13 +14,41 @@ fi
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
 DELAY_FILE="$CONFIG_DIR/face-unlock-delay"
-mkdir -p "$CONFIG_DIR"
+SOUND_FILE="$CONFIG_DIR/face-unlock-sound"
+CHIME_PATH="$CONFIG_DIR/sounds/face-match.wav"
+mkdir -p "$CONFIG_DIR/sounds"
 
 # Ensure Howdy is installed
 if ! command -v howdy >/dev/null 2>&1; then
   gum style --foreground 196 "Error: 'howdy' command not found."
   gum style --foreground 245 "Please install howdy-next from AUR first (yay -S howdy-next)."
   exit 1
+fi
+
+# Ensure chime sound exists
+if [[ ! -f "$CHIME_PATH" ]]; then
+  python -c '
+import wave, math, struct, os
+path = os.path.expanduser("~/.config/omarchy/sounds/face-match.wav")
+sample_rate = 44100
+duration = 0.35
+samples = int(sample_rate * duration)
+with wave.open(path, "w") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(sample_rate)
+    frames = bytearray()
+    for i in range(samples):
+        t = i / sample_rate
+        attack = min(1.0, t / 0.012)
+        decay1 = math.exp(-t * 9.0)
+        decay2 = math.exp(-max(0.0, t - 0.08) * 7.5) if t >= 0.08 else 0.0
+        tone1 = math.sin(2 * math.pi * 587.33 * t) * decay1 * 0.45
+        tone1_h = math.sin(2 * math.pi * 587.33 * 2 * t) * decay1 * 0.15
+        tone2 = (math.sin(2 * math.pi * 880.00 * (t - 0.08)) * decay2 * 0.55) if t >= 0.08 else 0.0
+        tone2_h = (math.sin(2 * math.pi * 880.00 * 2 * (t - 0.08)) * decay2 * 0.18) if t >= 0.08 else 0.0
+        val = max(-1.0, min(1.0, (tone1 + tone1_h + tone2 + tone2_h) * attack * 0.7))
+        frames.extend(struct.pack("<h", int(val * 32767)))
+    w.writeframes(frames)
+' 2>/dev/null || true
 fi
 
 # Authenticate sudo once up front
@@ -45,10 +73,38 @@ get_enrolled_count() {
   echo "$count"
 }
 
+get_howdy_status() {
+  if sudo grep -Eq "^disabled\s*=\s*true" /etc/howdy/config.ini 2>/dev/null; then
+    echo "Paused (Privacy Mode)"
+  else
+    echo "Active"
+  fi
+}
+
+get_current_certainty() {
+  local cert
+  cert=$(sudo grep -E "^certainty\s*=" /etc/howdy/config.ini 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' ' || echo "3.5")
+  echo "${cert:-3.5}"
+}
+
+get_sound_status() {
+  local s
+  s=$(cat "$SOUND_FILE" 2>/dev/null || echo "on")
+  echo "$s"
+}
+
 while true; do
   clear
   current_delay=$(get_current_delay)
   enrolled_count=$(get_enrolled_count)
+  howdy_status=$(get_howdy_status)
+  current_certainty=$(get_current_certainty)
+  sound_status=$(get_sound_status)
+
+  status_color=82
+  if [[ "$howdy_status" == *"Paused"* ]]; then
+    status_color=214
+  fi
 
   gum style \
     --border rounded \
@@ -57,8 +113,11 @@ while true; do
     --margin "0 0 1 0" \
     "  Face Unlock Management" \
     "" \
+    "  • Service Status:          $howdy_status" \
     "  • Enrolled Face Profiles:  $enrolled_count" \
     "  • Lockscreen Grace Delay:  ${current_delay}s" \
+    "  • Recognition Strictness:  $current_certainty" \
+    "  • Audio Chime:             $sound_status" \
     "  • IR Camera Sensor:        /dev/video2"
 
   choice=$(gum choose \
@@ -66,15 +125,19 @@ while true; do
     "📋  List enrolled face profiles" \
     "🗑️   Remove an enrolled face profile" \
     "⏱️   Configure lockscreen delay" \
+    "🎯  Configure recognition sensitivity (certainty)" \
+    "🔒  Toggle Privacy Mode (Enable/Disable)" \
+    "🔊  Toggle / Test unlock audio chime" \
+    "🛡️   Configure Polkit & Clamshell PAM rules" \
     "👁️   Test camera feed (live preview)" \
-    "🔒  Preview lock screen animations" \
+    "🖥️   Preview lock screen animations" \
     "🚪  Exit" || true)
 
   case "$choice" in
     "➕  Enroll new face profile")
       echo
       gum style --bold --foreground 212 "Enroll New Face Profile"
-      echo "Tip: Make sure your face is well-lit and facing the camera directly."
+      echo "Tip: Look straight at the camera with normal expression and lighting."
       echo
       label=$(gum input --placeholder "e.g. regular, glasses, dim-light" --prompt "Profile label: ") || true
       if [[ -n "${label:-}" ]]; then
@@ -104,7 +167,6 @@ while true; do
       gum style --bold --foreground 212 "Remove Face Profile"
       echo
 
-      # Extract ID and label list
       mapfile -t models < <(sudo howdy list 2>/dev/null | awk '$1 ~ /^[0-9]+$/ { print "ID " $1 " — " $NF }')
 
       if (( ${#models[@]} == 0 )); then
@@ -134,7 +196,7 @@ while true; do
     "⏱️   Configure lockscreen delay")
       echo
       gum style --bold --foreground 212 "Configure Lockscreen Grace Delay"
-      echo "This delay prevents the camera from instantly re-unlocking when you press Super+Ctrl+L."
+      echo "Prevents the camera from instantly re-authenticating upon Super+Ctrl+L."
       echo "Current delay: ${current_delay}s"
       echo
 
@@ -169,7 +231,129 @@ while true; do
         echo "$new_val" > "$DELAY_FILE"
         echo
         gum style --foreground 82 "✓ Lockscreen delay updated to ${new_val}s."
-        echo "This setting takes effect immediately on your next lock."
+        echo "Takes effect immediately on next lock."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🎯  Configure recognition sensitivity (certainty)")
+      echo
+      gum style --bold --foreground 212 "Configure Recognition Sensitivity (Certainty)"
+      echo "Lower value = stricter matching (more secure)."
+      echo "Higher value = lenient matching (faster, easier in tricky angles)."
+      echo "Current value: $current_certainty"
+      echo
+
+      cert_choice=$(gum choose \
+        "Strict (2.8 - High security, fewer false positives)" \
+        "Balanced (3.5 - Recommended default)" \
+        "Lenient (4.2 - Faster match, harder angles)" \
+        "Custom value..." \
+        "Keep current ($current_certainty)" || true)
+
+      new_cert=""
+      case "$cert_choice" in
+        "Strict"*) new_cert="2.8" ;;
+        "Balanced"*) new_cert="3.5" ;;
+        "Lenient"*) new_cert="4.2" ;;
+        "Custom"*)
+          new_cert=$(gum input --placeholder "e.g. 3.2" --prompt "Certainty threshold: ") || true
+          ;;
+        *) ;;
+      esac
+
+      if [[ -n "$new_cert" ]]; then
+        sudo howdy set certainty "$new_cert"
+        echo
+        gum style --foreground 82 "✓ Certainty sensitivity updated to $new_cert."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🔒  Toggle Privacy Mode (Enable/Disable)")
+      echo
+      if [[ "$howdy_status" == *"Paused"* ]]; then
+        echo "Enabling Face Unlock..."
+        sudo howdy disable 0
+        gum style --foreground 82 "✓ Face Unlock is now ACTIVE."
+      else
+        echo "Disabling Face Unlock (Privacy Mode)..."
+        sudo howdy disable 1
+        gum style --foreground 214 "✓ Face Unlock is now PAUSED. Login will require password."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🔊  Toggle / Test unlock audio chime")
+      echo
+      gum style --bold --foreground 212 "Unlock Audio Feedback Chime"
+      echo "Current status: $sound_status"
+      echo
+
+      sound_choice=$(gum choose \
+        "Enable audio chime" \
+        "Disable audio chime" \
+        "Test play chime now" \
+        "Back" || true)
+
+      case "$sound_choice" in
+        "Enable audio chime")
+          echo "on" > "$SOUND_FILE"
+          echo
+          gum style --foreground 82 "✓ Audio chime enabled."
+          pw-play "$CHIME_PATH" >/dev/null 2>&1 || true
+          ;;
+        "Disable audio chime")
+          echo "off" > "$SOUND_FILE"
+          echo
+          gum style --foreground 214 "✓ Audio chime disabled."
+          ;;
+        "Test play chime now")
+          echo "Playing sound..."
+          pw-play "$CHIME_PATH" >/dev/null 2>&1 || true
+          ;;
+        *) ;;
+      esac
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🛡️   Configure Polkit & Clamshell PAM rules")
+      echo
+      gum style --bold --foreground 212 "Polkit & Clamshell PAM Integration"
+      echo "This applies two rules:"
+      echo "  1. Clamshell Gate: Skips face unlock immediately when laptop lid is closed."
+      echo "  2. Graphical Polkit: Authenticate elevation prompts (software updates, disk mounting) with face recognition."
+      echo
+
+      if gum confirm "Apply Polkit & Clamshell PAM rules to system?"; then
+        # 1. Update /etc/pam.d/omarchy-lock-fingerprint
+        sudo tee /etc/pam.d/omarchy-lock-fingerprint >/dev/null <<'EOF'
+#%PAM-1.0
+auth       [success=2 default=ignore]  pam_exec.so quiet /usr/bin/omarchy-hw-laptop-closed
+auth       optional                    pam_exec.so quiet /usr/local/bin/omarchy-face-unlock-delay
+auth       required                    pam_howdy.so
+account    include                     system-local-login
+EOF
+
+        # 2. Update /etc/pam.d/polkit-1
+        sudo tee /etc/pam.d/polkit-1 >/dev/null <<'EOF'
+#%PAM-1.0
+auth       [success=1 default=ignore]  pam_exec.so quiet /usr/bin/omarchy-hw-laptop-closed
+auth       sufficient                  pam_howdy.so
+auth       required                    pam_unix.so
+
+account    required                    pam_unix.so
+password   required                    pam_unix.so
+session    required                    pam_unix.so
+EOF
+        echo
+        gum style --foreground 82 "✓ Polkit and Clamshell PAM rules configured successfully!"
+      else
+        gum style --foreground 245 "Cancelled."
       fi
       echo
       read -rp "Press Enter to continue..."
@@ -178,7 +362,7 @@ while true; do
     "👁️   Test camera feed (live preview)")
       echo
       gum style --bold --foreground 212 "Testing Camera Stream"
-      echo "A preview window will open with face tracking boxes."
+      echo "A preview window will open with face tracking."
       echo "Press 'q' or 'Esc' in the camera window when finished."
       echo
       sudo howdy test || true
@@ -186,10 +370,9 @@ while true; do
       read -rp "Press Enter to continue..."
       ;;
 
-    "🔒  Preview lock screen animations")
+    "🖥️   Preview lock screen animations")
       echo
       gum style --bold --foreground 212 "Launching Lock Screen Preview"
-      echo "Testing lock screen UI and face scanning animations..."
       echo "Click anywhere or press Esc to exit the preview."
       echo
       omarchy-shell lock preview || true

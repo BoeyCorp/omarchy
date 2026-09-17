@@ -13,6 +13,7 @@ Item {
   property bool faceScanning: false
   property bool faceDelayActive: false
   property bool faceMatched: false
+  property bool facePaused: false
   property bool authenticatingPassword: false
   property string failureMessage: ""
   property int failedAttempts: 0
@@ -35,7 +36,7 @@ Item {
   readonly property int passwordDotLetterSpacing: Math.round(Style.font.heading * 0.19)
   // Space to keep clear on each side of the field for the fingerprint icon
   // (icon width plus a gap) so the centered dots never run under it.
-  readonly property real fingerprintReserve: fingerprintConfigured ? Math.round(fingerprintIcon.implicitWidth + 12) : 0
+  readonly property real fingerprintReserve: (fingerprintConfigured || faceConfigured) ? Math.round(fingerprintIcon.implicitWidth + 12) : 0
   // Shrink the dots to fit once the password outgrows the field, so every
   // keystroke stays visible — otherwise long passwords clip with no feedback.
   readonly property real passwordDotScale: dotMetrics.advanceWidth > 0
@@ -49,6 +50,7 @@ Item {
 
   signal submitPassword(string password)
   signal passwordTextEdited(string password)
+  signal rescanRequested()
   signal clearFailureRequested()
   signal wakeRequested()
 
@@ -254,6 +256,7 @@ Item {
           if (root.faceMatched) return "Face recognized"
           if (root.faceScanning) return "Looking for you" + dotString
           if (root.faceDelayActive) return "Waiting to scan…"
+          if (root.facePaused) return "Face scan paused — press Enter to scan"
           return ""
         }
         visible: text.length > 0
@@ -326,6 +329,7 @@ Item {
           var submitted = root.passwordText
           root.passwordTextEdited("")
           if (submitted.length > 0) root.submitPassword(submitted)
+          else root.rescanRequested()
         }
 
         Keys.onPressed: function(event) {
@@ -345,6 +349,7 @@ Item {
           if (root.failureMessage.length > 0) return root.failureMessage
           if (root.faceMatched) return "Face recognized"
           if (root.faceScanning) return "Looking for you…"
+          if (root.facePaused) return "Press Enter to scan face"
           return root.placeholderText
         }
         visible: passwordInput.text.length === 0
@@ -366,13 +371,20 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: inputField.borderRight + 18
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.fingerprintConfigured
-        text: "󰈷"
-        color: Color.lock.placeholder
-        font.family: Style.font.family
+        visible: root.faceConfigured || root.fingerprintConfigured
+        text: root.faceConfigured ? (root.faceMatched ? "󰄬" : "\uf118") : "󰈷"
+        color: root.faceConfigured ? (root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : Color.lock.placeholder)) : Color.lock.placeholder
+        font.family: root.faceConfigured ? "JetBrainsMono Nerd Font" : Style.font.family
         font.pixelSize: Math.round(root.fieldFontSize * 1.1)
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
+
+        SequentialAnimation on opacity {
+          running: root.faceScanning
+          loops: Animation.Infinite
+          NumberAnimation { from: 1.0; to: 0.35; duration: 750; easing.type: Easing.InOutSine }
+          NumberAnimation { from: 0.35; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+        }
       }
     }
   }
