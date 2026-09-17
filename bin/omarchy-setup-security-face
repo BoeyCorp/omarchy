@@ -75,6 +75,117 @@ with wave.open(path, "w") as w:
 ' 2>/dev/null || true
 fi
 
+MANUAL_FILE="$CONFIG_DIR/docs/face-unlock-manual.md"
+if [[ ! -f "$MANUAL_FILE" && -f "/usr/share/omarchy/docs/face-unlock-manual.md" ]]; then
+  MANUAL_FILE="/usr/share/omarchy/docs/face-unlock-manual.md"
+elif [[ ! -f "$MANUAL_FILE" && -f "$HOME/Projects/omarchy/docs/face-unlock.md" ]]; then
+  MANUAL_FILE="$HOME/Projects/omarchy/docs/face-unlock.md"
+fi
+
+show_manual_terminal() {
+  if command -v bat >/dev/null 2>&1; then
+    bat --style=plain --paging=always "$MANUAL_FILE"
+  elif command -v gum >/dev/null 2>&1; then
+    gum pager --soft-wrap < "$MANUAL_FILE"
+  else
+    less -R "$MANUAL_FILE"
+  fi
+}
+
+show_cheat_sheet() {
+  clear
+  gum style \
+    --border double \
+    --border-foreground 212 \
+    --padding "1 2" \
+    --margin "1 0" \
+    "⚡ Face Unlock Quick Reference" \
+    "" \
+    "  Shortcuts:" \
+    "    • Super + Ctrl + L      Normal lock (4s grace delay)" \
+    "    • Super + Alt + L       Panic Lockdown (forces master password)" \
+    "    • Type password         Instant unlock (0ms delay)" \
+    "    • Empty Enter           Rescan face when paused" \
+    "" \
+    "  Badge Indicators:" \
+    "    •   Smiley             Waiting / grace period active" \
+    "    •   + Sweep Laser      Actively scanning for your face" \
+    "    • 󰄬  Green Checkmark    Matched & unlocked (plays match chime)" \
+    "    • 󰅙  Red Cross          Mismatch (shakes head & plays reject chime)" \
+    "    • 󰌾  Padlock Shield     Panic Lockdown active (password only)" \
+    "" \
+    "  Security & Protections:" \
+    "    • 3+ Failed Attempts    Silent photo capture to ~/.local/state/omarchy/intruder-snapshots/" \
+    "    • 2 Consecutive Scans   Camera standby guard to preserve battery" \
+    "    • Clamshell Lid Closed  Camera automatically suppressed" \
+    "    • Hardware IR Emitter   Active 850/940nm LEDs to block 2D photo spoofing" \
+    "" \
+    "  Commands:" \
+    "    • omarchy setup security face           Open Management UI" \
+    "    • omarchy setup security face --manual  View Full User Manual" \
+    "    • sudo howdy test                       Test IR camera stream" \
+    "    • sudo howdy list                       List enrolled face models" \
+    "    • omarchy-shell lock preview            Preview lock screen UI"
+  echo
+  read -rp "Press Enter to return..."
+}
+
+show_manual_menu() {
+  while true; do
+    clear
+    gum style \
+      --border rounded \
+      --border-foreground 212 \
+      --padding "0 2" \
+      --margin "0 0 1 0" \
+      "📖  Face Unlock User Manual & Reference" \
+      "" \
+      "Select a format to read or open the complete documentation:"
+
+    local subchoice
+    subchoice=$(gum choose \
+      "📖  Read Full Manual in Terminal (Interactive Pager)" \
+      "⚡  Quick Shortcuts & Indicators Cheat Sheet" \
+      "📓  Open User Manual in Obsidian" \
+      "🌐  Open User Manual in Default System Editor" \
+      "🔙  Back to Main Menu" || true)
+
+    case "$subchoice" in
+      "📖  Read Full Manual in Terminal"*)
+        show_manual_terminal
+        ;;
+      "⚡  Quick Shortcuts"*)
+        show_cheat_sheet
+        ;;
+      "📓  Open User Manual in Obsidian"*)
+        echo
+        local obs_vault="/home/boey/Documents/BoeyCorp"
+        if [[ -d "$obs_vault" ]] && command -v obsidian >/dev/null 2>&1; then
+          gum style --foreground 82 "Opening Obsidian note..."
+          xdg-open "obsidian://open?vault=BoeyCorp&file=Omarchy%2FFace%20Unlock" >/dev/null 2>&1 &
+        else
+          xdg-open "$MANUAL_FILE" >/dev/null 2>&1 &
+        fi
+        sleep 0.5
+        ;;
+      "🌐  Open User Manual in Default System Editor"*)
+        echo
+        gum style --foreground 82 "Opening in default viewer..."
+        xdg-open "$MANUAL_FILE" >/dev/null 2>&1 &
+        sleep 0.5
+        ;;
+      "🔙  Back to Main Menu"|*)
+        break
+        ;;
+    esac
+  done
+}
+
+if [[ "${1:-}" == "--manual" || "${1:-}" == "-m" || "${1:-}" == "manual" ]]; then
+  show_manual_menu
+  exit 0
+fi
+
 # Authenticate sudo once up front
 echo -e "\033[1;34m::\033[0m Checking administrator permissions..."
 sudo -v
@@ -179,6 +290,7 @@ while true; do
     "🛡️   Configure Polkit & Clamshell PAM rules" \
     "👁️   Test camera feed (live preview)" \
     "🖥️   Preview lock screen animations" \
+    "📖  User Manual & Reference Guide" \
     "🚪  Exit" || true)
 
   case "$choice" in
@@ -563,6 +675,10 @@ EOF
       echo "Click anywhere or press Esc to exit the preview."
       echo
       omarchy-shell lock preview || true
+      ;;
+
+    "📖  User Manual & Reference Guide")
+      show_manual_menu
       ;;
 
     "🚪  Exit"|*)
