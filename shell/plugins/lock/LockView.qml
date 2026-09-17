@@ -9,6 +9,10 @@ Item {
   property string backgroundPath: ""
   property int backgroundVersion: 0
   property bool fingerprintConfigured: false
+  property bool faceConfigured: false
+  property bool faceScanning: false
+  property bool faceDelayActive: false
+  property bool faceMatched: false
   property bool authenticatingPassword: false
   property string failureMessage: ""
   property int failedAttempts: 0
@@ -121,6 +125,154 @@ Item {
       onPositionChanged: root.wakeRequested()
     }
 
+    Item {
+      id: faceIndicator
+      objectName: "faceIndicator"
+      width: 72
+      height: 72
+      anchors.bottom: inputField.top
+      anchors.bottomMargin: 28
+      anchors.horizontalCenter: parent.horizontalCenter
+      visible: root.faceConfigured
+
+      // Pulsing outer radar waves while scanning
+      Rectangle {
+        id: pulseWave1
+        width: 72
+        height: 72
+        radius: 36
+        anchors.centerIn: faceBadge
+        color: "transparent"
+        border.color: Color.accent
+        border.width: 1.5
+        opacity: 0
+        scale: 1.0
+        visible: root.faceScanning
+
+        ParallelAnimation {
+          id: pulseAnim1
+          running: root.faceScanning
+          loops: Animation.Infinite
+          NumberAnimation { target: pulseWave1; property: "scale"; from: 0.95; to: 1.55; duration: 1200; easing.type: Easing.OutQuad }
+          NumberAnimation { target: pulseWave1; property: "opacity"; from: 0.7; to: 0; duration: 1200; easing.type: Easing.OutQuad }
+        }
+      }
+
+      Rectangle {
+        id: pulseWave2
+        width: 72
+        height: 72
+        radius: 36
+        anchors.centerIn: faceBadge
+        color: "transparent"
+        border.color: Color.accent
+        border.width: 1.5
+        opacity: 0
+        scale: 1.0
+        visible: root.faceScanning
+
+        SequentialAnimation {
+          running: root.faceScanning
+          loops: Animation.Infinite
+          PauseAnimation { duration: 600 }
+          ParallelAnimation {
+            NumberAnimation { target: pulseWave2; property: "scale"; from: 0.95; to: 1.55; duration: 1200; easing.type: Easing.OutQuad }
+            NumberAnimation { target: pulseWave2; property: "opacity"; from: 0.7; to: 0; duration: 1200; easing.type: Easing.OutQuad }
+          }
+        }
+      }
+
+      // Central Face Badge
+      Rectangle {
+        id: faceBadge
+        width: 64
+        height: 64
+        radius: 32
+        anchors.centerIn: parent
+        color: Color.lock.background
+        clip: true
+        border.width: 2
+        border.color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : (root.errorState ? Color.lock.borderError : Color.lock.border))
+
+        Behavior on border.color {
+          ColorAnimation { duration: 250 }
+        }
+
+        // Animated laser sweep line moving up and down across the face
+        Rectangle {
+          id: scanLaser
+          objectName: "scanLaser"
+          width: parent.width
+          height: 2
+          color: Color.accent
+          opacity: 0.8
+          anchors.horizontalCenter: parent.horizontalCenter
+          visible: root.faceScanning
+
+          SequentialAnimation {
+            id: scanLaserAnim
+            running: root.faceScanning
+            loops: Animation.Infinite
+            NumberAnimation { target: scanLaser; property: "y"; from: 4; to: 58; duration: 900; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: scanLaser; property: "y"; from: 58; to: 4; duration: 900; easing.type: Easing.InOutQuad }
+          }
+        }
+
+        Text {
+          id: faceIconText
+          objectName: "faceIconText"
+          anchors.centerIn: parent
+          text: root.faceMatched ? "󰄬" : "\uf118"
+          font.family: Style.font.family
+          font.pixelSize: 28
+          color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : Color.lock.placeholder)
+
+          Behavior on color {
+            ColorAnimation { duration: 200 }
+          }
+
+          SequentialAnimation {
+            id: breatheAnim
+            running: root.faceScanning
+            loops: Animation.Infinite
+            NumberAnimation { target: faceIconText; property: "scale"; from: 1.0; to: 1.12; duration: 700; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: faceIconText; property: "scale"; from: 1.12; to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
+          }
+        }
+      }
+
+      // Dynamic Status Label below face badge
+      Text {
+        id: faceStatusLabel
+        anchors.top: faceBadge.bottom
+        anchors.topMargin: 8
+        anchors.horizontalCenter: faceBadge.horizontalCenter
+        font.family: Style.font.family
+        font.pixelSize: Math.round(Style.font.body * 0.85)
+        color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : Color.lock.placeholder)
+        text: {
+          if (root.faceMatched) return "Face recognized"
+          if (root.faceScanning) return "Looking for you" + dotString
+          if (root.faceDelayActive) return "Waiting to scan…"
+          return ""
+        }
+        visible: text.length > 0
+
+        property string dotString: "…"
+        Timer {
+          interval: 400
+          repeat: true
+          running: root.faceScanning
+          onTriggered: {
+            if (faceStatusLabel.dotString === "…") faceStatusLabel.dotString = ""
+            else if (faceStatusLabel.dotString === "") faceStatusLabel.dotString = "·"
+            else if (faceStatusLabel.dotString === "·") faceStatusLabel.dotString = "··"
+            else faceStatusLabel.dotString = "…"
+          }
+        }
+      }
+    }
+
     BorderSurface {
       id: inputField
       width: root.fieldWidth
@@ -188,9 +340,15 @@ Item {
       Text {
         textFormat: Text.PlainText
         anchors.fill: passwordInput
-        text: root.authenticatingPassword ? "Checking…" : (root.failureMessage.length > 0 ? root.failureMessage : root.placeholderText)
+        text: {
+          if (root.authenticatingPassword) return "Checking…"
+          if (root.failureMessage.length > 0) return root.failureMessage
+          if (root.faceMatched) return "Face recognized"
+          if (root.faceScanning) return "Looking for you…"
+          return root.placeholderText
+        }
         visible: passwordInput.text.length === 0
-        color: root.authenticatingPassword ? Color.lock.text : (root.failureMessage.length > 0 ? Color.lock.textError : Color.lock.placeholder)
+        color: root.authenticatingPassword ? Color.lock.text : (root.failureMessage.length > 0 ? Color.lock.textError : (root.faceScanning ? Color.accent : Color.lock.placeholder))
         font.family: Style.font.family
         font.pixelSize: root.fieldFontSize
         font.italic: !root.authenticatingPassword && root.failureMessage.length > 0

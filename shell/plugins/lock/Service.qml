@@ -42,6 +42,12 @@ Item {
   property bool strandedLock: false
   property bool strandedLockResolved: false
 
+  property bool faceScanning: fingerprintAuthenticating && fingerprintPam.active && faceConfigured
+  property bool faceDelayActive: false
+  property bool faceMatched: false
+  property bool faceConfigured: false
+  property int faceUnlockDelayMs: 4000
+
   readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
   readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating
   readonly property var batteryService: shell && shell.services ? shell.firstPartyServiceFor("omarchy.battery") : null
@@ -131,6 +137,10 @@ Item {
     authenticatingPassword = false
     fingerprintAuthenticating = false
     fingerprintRetryTimer.stop()
+    initialFaceDelayTimer.stop()
+    faceSuccessTimer.stop()
+    faceDelayActive = false
+    faceMatched = false
     if (passwordPam.active) passwordPam.abort()
     if (fingerprintPam.active) fingerprintPam.abort()
   }
@@ -141,6 +151,7 @@ Item {
       return false
     }
 
+    if (!delayReadProc.running) delayReadProc.running = true
     resetAuthenticationState()
     lockRequested = true
     armBlankTimer()
@@ -245,7 +256,7 @@ Item {
   }
 
   function startFingerprint() {
-    if (!lockRequested || !sessionLock.secure || !fingerprintConfigured) return
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured)) return
     if (fingerprintPam.active || fingerprintAuthenticating) return
 
     fingerprintAuthenticating = true
@@ -259,8 +270,13 @@ Item {
 
     if (!lockRequested) return
     if (result === PamResult.Success) {
-      finishUnlock()
-    } else if (fingerprintConfigured) {
+      if (root.faceConfigured) {
+        faceMatched = true
+        faceSuccessTimer.restart()
+      } else {
+        finishUnlock()
+      }
+    } else if (fingerprintConfigured || faceConfigured) {
       fingerprintRetryTimer.restart()
     }
   }
@@ -276,7 +292,14 @@ Item {
         root.pendingSessionLock = false
         sessionLockStabilizeTimer.stop()
         pendingSessionLockTimer.stop()
-        root.startFingerprint()
+        if (root.faceConfigured && root.faceUnlockDelayMs > 0) {
+          root.faceDelayActive = true
+          initialFaceDelayTimer.interval = root.faceUnlockDelayMs
+          initialFaceDelayTimer.restart()
+        } else {
+          root.faceDelayActive = false
+          root.startFingerprint()
+        }
       }
     }
 
@@ -309,6 +332,10 @@ Item {
         backgroundPath: root.backgroundPath
         backgroundVersion: root.backgroundVersion
         fingerprintConfigured: root.fingerprintConfigured
+        faceConfigured: root.faceConfigured
+        faceScanning: root.faceScanning
+        faceDelayActive: root.faceDelayActive
+        faceMatched: root.faceMatched
         authenticatingPassword: root.authenticatingPassword
         failureMessage: root.failureMessage
         failedAttempts: root.failedAttempts
@@ -341,6 +368,10 @@ Item {
       backgroundPath: root.backgroundPath
       backgroundVersion: root.backgroundVersion
       fingerprintConfigured: root.fingerprintConfigured
+      faceConfigured: root.faceConfigured
+      faceScanning: false
+      faceDelayActive: false
+      faceMatched: false
       authenticatingPassword: false
       failureMessage: ""
       failedAttempts: 0
@@ -416,14 +447,49 @@ Item {
     }
   }
 
+  Timer {
+    id: initialFaceDelayTimer
+    interval: root.faceUnlockDelayMs
+    repeat: false
+    onTriggered: {
+      root.faceDelayActive = false
+      root.startFingerprint()
+    }
+  }
+
+  Timer {
+    id: faceSuccessTimer
+    interval: 350
+    repeat: false
+    onTriggered: root.finishUnlock()
+  }
+
+  Process {
+    id: delayReadProc
+    command: ["bash", "-c", "cat \"$HOME/.config/omarchy/face-unlock-delay\" 2>/dev/null || echo 4"]
+    stdout: StdioCollector {
+      id: delayReadStdout
+      waitForEnd: true
+    }
+    onExited: {
+      var n = parseInt(String(delayReadStdout.text || "").trim())
+      if (!isNaN(n) && n >= 0) {
+        root.faceUnlockDelayMs = n * 1000
+      }
+    }
+  }
+
   Process {
     id: fingerprintCheckProc
-    command: ["bash", "-c", "if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]] && command -v fprintd-list >/dev/null 2>&1 && fprintd-list \"$USER\" 2>/dev/null | grep -qi finger; then echo yes; else echo no; fi"]
+    command: ["bash", "-c", "has_fp=no; has_face=no; if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]]; then if command -v fprintd-list >/dev/null 2>&1 && fprintd-list \"$USER\" 2>/dev/null | grep -qi finger; then has_fp=yes; fi; if grep -q pam_howdy /etc/pam.d/omarchy-lock-fingerprint 2>/dev/null || (command -v howdy >/dev/null 2>&1 && howdy list 2>/dev/null | grep -q '^[0-9]'); then has_face=yes; fi; fi; echo \"$has_fp $has_face\""]
     stdout: StdioCollector { id: fingerprintCheckStdout; waitForEnd: true }
     onExited: {
-      root.fingerprintConfigured = String(fingerprintCheckStdout.text || "").trim() === "yes"
-      if (root.lockRequested && root.fingerprintConfigured) root.startFingerprint()
-      else if (!root.fingerprintConfigured && fingerprintPam.active) fingerprintPam.abort()
+      var parts = String(fingerprintCheckStdout.text || "").trim().split(/\s+/)
+      root.fingerprintConfigured = parts[0] === "yes"
+      root.faceConfigured = parts[1] === "yes"
+      var biometricsActive = root.fingerprintConfigured || root.faceConfigured
+      if (root.lockRequested && biometricsActive && !root.faceDelayActive) root.startFingerprint()
+      else if (!biometricsActive && fingerprintPam.active) fingerprintPam.abort()
     }
   }
 
