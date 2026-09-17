@@ -5,6 +5,10 @@
 # omarchy:name=lock
 # omarchy:examples=omarchy system lock
 
+if [[ -n ${XDG_RUNTIME_DIR:-} ]]; then
+  date +%s > "$XDG_RUNTIME_DIR/omarchy-manual-lock-time" 2>/dev/null || true
+fi
+
 omarchy-shell lock lock >/dev/null
 
 # Set keyboard layout to default (first layout)
