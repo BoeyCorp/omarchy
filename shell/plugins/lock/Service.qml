@@ -42,10 +42,14 @@ Item {
   property bool strandedLock: false
   property bool strandedLockResolved: false
 
-  property bool faceScanning: fingerprintAuthenticating && fingerprintPam.active && faceConfigured
+  property bool faceScanning: fingerprintAuthenticating && fingerprintPam.active && faceConfigured && !lockdownMode
   property bool faceDelayActive: false
   property bool faceMatched: false
+  property bool faceRejected: false
   property bool faceConfigured: false
+  property bool lockdownMode: false
+  property int totalFailedAttempts: 0
+  property int intruderSnapshotsCaptured: 0
   property int faceUnlockDelayMs: 4000
   property bool laptopClosed: false
   property int faceAttemptCount: 0
@@ -145,6 +149,8 @@ Item {
     faceSuccessTimer.stop()
     faceDelayActive = false
     faceMatched = false
+    faceRejected = false
+    faceRejectTimer.stop()
     faceAttemptCount = 0
     if (passwordPam.active) passwordPam.abort()
     if (fingerprintPam.active) fingerprintPam.abort()
@@ -175,6 +181,10 @@ Item {
   function finishUnlock() {
     if (!root.locked && !lockRequested) return
 
+    if (intruderSnapshotsCaptured > 0) {
+      if (!intruderAlertProc.running) intruderAlertProc.running = true
+    }
+
     lockRequested = false
     pendingSessionLock = false
     sessionLockStabilizeTimer.stop()
@@ -182,6 +192,10 @@ Item {
     resetAuthenticationState()
     idleBlankTimer.stop()
     sessionLock.locked = false
+    totalFailedAttempts = 0
+    intruderSnapshotsCaptured = 0
+    lockdownMode = false
+    faceRejected = false
     logEvent("unlocked")
     runWake()
   }
@@ -257,12 +271,19 @@ Item {
     enteredPassword = ""
     pendingPassword = ""
     failedAttempts += 1
+    totalFailedAttempts += 1
+    if (totalFailedAttempts >= 3) {
+      if (!intruderSnapshotProc.running) {
+        intruderSnapshotProc.running = true
+        intruderSnapshotsCaptured += 1
+      }
+    }
     failureMessage = "Authentication failed (" + failedAttempts + ")"
     runWake()
   }
 
   function startFingerprint() {
-    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed) return
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed || lockdownMode) return
     if (fingerprintPam.active || fingerprintAuthenticating) return
 
     fingerprintAuthenticating = true
@@ -276,16 +297,26 @@ Item {
 
     if (!lockRequested) return
     if (result === PamResult.Success) {
-      if (root.faceConfigured) {
-        faceMatched = true
-        faceAttemptCount = 0
-        if (!chimeProc.running) chimeProc.running = true
-        faceSuccessTimer.restart()
-      } else {
-        finishUnlock()
-      }
+      faceMatched = true
+      faceRejected = false
+      faceAttemptCount = 0
+      if (faceConfigured && !chimeProc.running) chimeProc.running = true
+      faceSuccessTimer.restart()
     } else if (fingerprintConfigured || faceConfigured) {
+      faceRejected = true
+      faceRejectTimer.restart()
+      if (faceConfigured) {
+        lockView.triggerHeadShake()
+        if (!rejectChimeProc.running) rejectChimeProc.running = true
+      }
       faceAttemptCount += 1
+      totalFailedAttempts += 1
+      if (totalFailedAttempts >= 3) {
+        if (!intruderSnapshotProc.running) {
+          intruderSnapshotProc.running = true
+          intruderSnapshotsCaptured += 1
+        }
+      }
       if (faceAttemptCount < faceMaxAttempts && !laptopClosed) {
         fingerprintRetryTimer.restart()
       } else {
@@ -295,9 +326,11 @@ Item {
   }
 
   function requestFaceRescan() {
-    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed) return
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed || lockdownMode) return
     faceAttemptCount = 0
     faceDelayActive = false
+    faceRejected = false
+    faceRejectTimer.stop()
     if (!laptopClosedProc.running) laptopClosedProc.running = true
     startFingerprint()
   }
@@ -313,7 +346,9 @@ Item {
         root.pendingSessionLock = false
         sessionLockStabilizeTimer.stop()
         pendingSessionLockTimer.stop()
-        if (root.faceConfigured && root.faceUnlockDelayMs > 0) {
+        if (root.lockdownMode) {
+          root.faceDelayActive = false
+        } else if (root.faceConfigured && root.faceUnlockDelayMs > 0) {
           root.faceDelayActive = true
           initialFaceDelayTimer.interval = root.faceUnlockDelayMs
           initialFaceDelayTimer.restart()
@@ -357,7 +392,9 @@ Item {
         faceScanning: root.faceScanning
         faceDelayActive: root.faceDelayActive
         faceMatched: root.faceMatched
+        faceRejected: root.faceRejected
         facePaused: root.facePaused
+        lockdownMode: root.lockdownMode
         authenticatingPassword: root.authenticatingPassword
         failureMessage: root.failureMessage
         failedAttempts: root.failedAttempts
@@ -395,6 +432,9 @@ Item {
       faceScanning: false
       faceDelayActive: false
       faceMatched: false
+      faceRejected: false
+      facePaused: false
+      lockdownMode: false
       authenticatingPassword: false
       failureMessage: ""
       failedAttempts: 0
@@ -502,6 +542,28 @@ Item {
   Process {
     id: chimeProc
     command: ["bash", "-c", "if [[ -f \"$HOME/.config/omarchy/sounds/face-match.wav\" && \"$(cat \"$HOME/.config/omarchy/face-unlock-sound\" 2>/dev/null)\" != \"off\" ]]; then pw-play \"$HOME/.config/omarchy/sounds/face-match.wav\" >/dev/null 2>&1; fi"]
+  }
+
+  Timer {
+    id: faceRejectTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.faceRejected = false
+  }
+
+  Process {
+    id: rejectChimeProc
+    command: ["bash", "-c", "if [[ -f \"$HOME/.config/omarchy/sounds/face-reject.wav\" && \"$(cat \"$HOME/.config/omarchy/face-unlock-sound\" 2>/dev/null)\" != \"off\" ]]; then pw-play \"$HOME/.config/omarchy/sounds/face-reject.wav\" >/dev/null 2>&1; fi"]
+  }
+
+  Process {
+    id: intruderSnapshotProc
+    command: ["bash", "-c", "mkdir -p \"$HOME/.local/state/omarchy/intruder-snapshots\"; ffmpeg -y -f v4l2 -i /dev/video0 -frames:v 1 -update 1 \"$HOME/.local/state/omarchy/intruder-snapshots/intruder-$(date +%Y%m%d-%H%M%S).jpg\" >/dev/null 2>&1 || true"]
+  }
+
+  Process {
+    id: intruderAlertProc
+    command: ["bash", "-c", "LATEST=$(ls -t \"$HOME/.local/state/omarchy/intruder-snapshots/\"*.jpg 2>/dev/null | head -n 1); COUNT=$(ls \"$HOME/.local/state/omarchy/intruder-snapshots/\"*.jpg 2>/dev/null | wc -l); notify-send -u critical -i \"${LATEST:-security-high}\" \"Security Alert\" \"$COUNT failed unlock attempt(s) detected while locked.\nSnapshots saved to ~/.local/state/omarchy/intruder-snapshots/\""]
   }
 
   Process {
@@ -688,6 +750,13 @@ Item {
 
     function lock(): string {
       if (!root.passwordPamConfigured) return "missing-pam"
+      if (!root.locked && !root.beginLock()) return "failed"
+      return "ok"
+    }
+
+    function lockdown(): string {
+      if (!root.passwordPamConfigured) return "missing-pam"
+      root.lockdownMode = true
       if (!root.locked && !root.beginLock()) return "failed"
       return "ok"
     }

@@ -16,6 +16,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
 DELAY_FILE="$CONFIG_DIR/face-unlock-delay"
 SOUND_FILE="$CONFIG_DIR/face-unlock-sound"
 CHIME_PATH="$CONFIG_DIR/sounds/face-match.wav"
+REJECT_PATH="$CONFIG_DIR/sounds/face-reject.wav"
 mkdir -p "$CONFIG_DIR/sounds"
 
 # Ensure Howdy is installed
@@ -25,7 +26,7 @@ if ! command -v howdy >/dev/null 2>&1; then
   exit 1
 fi
 
-# Ensure chime sound exists
+# Ensure chime sounds exist
 if [[ ! -f "$CHIME_PATH" ]]; then
   python -c '
 import wave, math, struct, os
@@ -46,6 +47,29 @@ with wave.open(path, "w") as w:
         tone2 = (math.sin(2 * math.pi * 880.00 * (t - 0.08)) * decay2 * 0.55) if t >= 0.08 else 0.0
         tone2_h = (math.sin(2 * math.pi * 880.00 * 2 * (t - 0.08)) * decay2 * 0.18) if t >= 0.08 else 0.0
         val = max(-1.0, min(1.0, (tone1 + tone1_h + tone2 + tone2_h) * attack * 0.7))
+        frames.extend(struct.pack("<h", int(val * 32767)))
+    w.writeframes(frames)
+' 2>/dev/null || true
+fi
+
+if [[ ! -f "$REJECT_PATH" ]]; then
+  python -c '
+import wave, math, struct, os
+path = os.path.expanduser("~/.config/omarchy/sounds/face-reject.wav")
+sample_rate = 44100
+duration = 0.28
+samples = int(sample_rate * duration)
+with wave.open(path, "w") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(sample_rate)
+    frames = bytearray()
+    for i in range(samples):
+        t = i / sample_rate
+        attack = min(1.0, t / 0.01)
+        decay1 = math.exp(-t * 11.0)
+        decay2 = math.exp(-max(0.0, t - 0.07) * 9.0) if t >= 0.07 else 0.0
+        tone1 = math.sin(2 * math.pi * 220.0 * t) * decay1 * 0.45
+        tone2 = (math.sin(2 * math.pi * 164.81 * (t - 0.07)) * decay2 * 0.55) if t >= 0.07 else 0.0
+        val = max(-1.0, min(1.0, (tone1 + tone2) * attack * 0.65))
         frames.extend(struct.pack("<h", int(val * 32767)))
     w.writeframes(frames)
 ' 2>/dev/null || true
@@ -93,6 +117,23 @@ get_sound_status() {
   echo "$s"
 }
 
+get_intruder_count() {
+  local dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/intruder-snapshots"
+  if [[ -d "$dir" ]]; then
+    find "$dir" -maxdepth 1 -name "*.jpg" 2>/dev/null | wc -l
+  else
+    echo "0"
+  fi
+}
+
+get_antispoof_status() {
+  if systemctl is-active --quiet linux-enable-ir-emitter.service 2>/dev/null; then
+    echo "Active (IR Hardware)"
+  else
+    echo "Passive"
+  fi
+}
+
 while true; do
   clear
   current_delay=$(get_current_delay)
@@ -100,6 +141,8 @@ while true; do
   howdy_status=$(get_howdy_status)
   current_certainty=$(get_current_certainty)
   sound_status=$(get_sound_status)
+  intruder_count=$(get_intruder_count)
+  antispoof_status=$(get_antispoof_status)
 
   status_color=82
   if [[ "$howdy_status" == *"Paused"* ]]; then
@@ -117,17 +160,22 @@ while true; do
     "  • Enrolled Face Profiles:  $enrolled_count" \
     "  • Lockscreen Grace Delay:  ${current_delay}s" \
     "  • Recognition Strictness:  $current_certainty" \
-    "  • Audio Chime:             $sound_status" \
+    "  • Anti-Spoofing IR Guard:  $antispoof_status" \
+    "  • Intruder Snapshots:      $intruder_count recorded" \
+    "  • Audio Feedback:          $sound_status" \
     "  • IR Camera Sensor:        /dev/video2"
 
   choice=$(gum choose \
     "➕  Enroll new face profile" \
+    "🧠  Adaptive Multi-Condition Calibration Wizard" \
     "📋  List enrolled face profiles" \
     "🗑️   Remove an enrolled face profile" \
     "⏱️   Configure lockscreen delay" \
     "🎯  Configure recognition sensitivity (certainty)" \
+    "🛡️   Configure Anti-Spoofing & Liveness Guard" \
+    "📸  View / Manage Intruder Snapshots" \
     "🔒  Toggle Privacy Mode (Enable/Disable)" \
-    "🔊  Toggle / Test unlock audio chime" \
+    "🔊  Toggle / Test unlock audio chimes" \
     "🛡️   Configure Polkit & Clamshell PAM rules" \
     "👁️   Test camera feed (live preview)" \
     "🖥️   Preview lock screen animations" \
@@ -149,6 +197,43 @@ while true; do
       else
         gum style --foreground 245 "Enrollment cancelled."
       fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🧠  Adaptive Multi-Condition Calibration Wizard")
+      echo
+      gum style --bold --foreground 212 "Adaptive Multi-Condition Calibration Wizard"
+      echo "This wizard optimizes facial recognition across 4 real-world environments:"
+      echo "  1. Standard Daylight (Direct gaze, normal room lighting)"
+      echo "  2. Dim / Dark Room (Active IR illuminator dominant)"
+      echo "  3. Lap / Tilted Angle (Laptop resting on lap, tilted upward)"
+      echo "  4. Alternate Expression / Glasses (Smiling or wearing accessories)"
+      echo
+
+      conditions=(
+        "regular:Sit normally facing the screen with comfortable room lighting"
+        "dim-night:Turn down or off room lights to calibrate pure IR sensor illumination"
+        "tilted-lap:Tilt your laptop screen back slightly as if resting on your lap"
+        "alt-expression:Put on glasses or make a natural smile"
+      )
+
+      for item in "${conditions[@]}"; do
+        cond_label="${item%%:*}"
+        instruction="${item#*:}"
+        echo
+        gum style --bold --foreground 82 "Step: [$cond_label]"
+        echo "$instruction"
+        if gum confirm "Ready to capture model for '$cond_label'?"; then
+          sudo howdy add -y "$cond_label" || sudo howdy add "$cond_label"
+          echo
+          gum style --foreground 82 "✓ Profile '$cond_label' captured!"
+        else
+          gum style --foreground 245 "Skipped '$cond_label'."
+        fi
+      done
+      echo
+      gum style --foreground 82 "✓ Multi-condition calibration completed!"
       echo
       read -rp "Press Enter to continue..."
       ;;
@@ -272,6 +357,103 @@ while true; do
       read -rp "Press Enter to continue..."
       ;;
 
+    "🛡️   Configure Anti-Spoofing & Liveness Guard")
+      echo
+      gum style --bold --foreground 212 "Anti-Spoofing & Liveness Guard"
+      echo "Active IR illumination combined with neural net 3D feature verification"
+      echo "prevents authentication bypass from smartphone screens, tablets, or printed photos."
+      echo
+      echo "Current Settings:"
+      echo "  • Hardware IR Strobe:      $(systemctl is-active linux-enable-ir-emitter.service 2>/dev/null || echo 'inactive')"
+      echo "  • Dark Frame Rejection:    $(sudo grep -E '^dark_threshold' /etc/howdy/config.ini 2>/dev/null || echo 'dark_threshold = 50.0')"
+      echo "  • YuNet Feature Threshold: $(sudo grep -E '^yunet_score_threshold' /etc/howdy/config.ini 2>/dev/null || echo 'yunet_score_threshold = 0.82')"
+      echo
+
+      as_choice=$(gum choose \
+        "Enable High-Security Anti-Spoof Mode" \
+        "Standard Balanced Security" \
+        "Check IR Strobe Service Status" \
+        "Back" || true)
+
+      case "$as_choice" in
+        "Enable High-Security Anti-Spoof Mode")
+          sudo systemctl enable --now linux-enable-ir-emitter.service 2>/dev/null || true
+          sudo howdy set dark_threshold 50.0 2>/dev/null || true
+          sudo howdy set yunet_score_threshold 0.82 2>/dev/null || true
+          sudo howdy set clahe_enabled true 2>/dev/null || true
+          echo
+          gum style --foreground 82 "✓ High-Security Anti-Spoofing activated!"
+          echo "  - Dark frame rejection threshold: 50%"
+          echo "  - YuNet 3D feature confidence: 0.82"
+          echo "  - CLAHE contrast normalization enabled"
+          ;;
+        "Standard Balanced Security")
+          sudo howdy set dark_threshold 60.0 2>/dev/null || true
+          sudo howdy set yunet_score_threshold 0.75 2>/dev/null || true
+          echo
+          gum style --foreground 82 "✓ Restored standard balanced security parameters."
+          ;;
+        "Check IR Strobe Service Status")
+          echo
+          systemctl status linux-enable-ir-emitter.service || true
+          ;;
+        *) ;;
+      esac
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "📸  View / Manage Intruder Snapshots")
+      snap_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/intruder-snapshots"
+      mkdir -p "$snap_dir"
+      mapfile -t snaps < <(ls -t "$snap_dir/"*.jpg 2>/dev/null)
+      count="${#snaps[@]}"
+
+      echo
+      gum style --bold --foreground 212 "Intruder / Snooper Snapshots"
+      echo "Silently captured when 3 or more consecutive failed unlock attempts occur."
+      echo "Total snapshots on disk: $count"
+      echo
+
+      snap_choice=$(gum choose \
+        "List recent snapshots" \
+        "Open latest snapshot in viewer" \
+        "Open snapshots directory" \
+        "Clear all snapshots" \
+        "Back" || true)
+
+      case "$snap_choice" in
+        "List recent snapshots")
+          if (( count == 0 )); then
+            echo "No snapshots recorded yet."
+          else
+            ls -lh "$snap_dir"
+          fi
+          ;;
+        "Open latest snapshot in viewer")
+          if (( count > 0 )); then
+            latest="${snaps[0]}"
+            echo "Opening $latest..."
+            xdg-open "$latest" >/dev/null 2>&1 || flea --gui "$latest" >/dev/null 2>&1 &
+          else
+            echo "No snapshots recorded."
+          fi
+          ;;
+        "Open snapshots directory")
+          xdg-open "$snap_dir" >/dev/null 2>&1 || flea --gui "$snap_dir" >/dev/null 2>&1 &
+          ;;
+        "Clear all snapshots")
+          if gum confirm "Delete all $count intruder snapshot images?"; then
+            rm -f "$snap_dir/"*.jpg
+            gum style --foreground 82 "✓ Intruder snapshots cleared."
+          fi
+          ;;
+        *) ;;
+      esac
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
     "🔒  Toggle Privacy Mode (Enable/Disable)")
       echo
       if [[ "$howdy_status" == *"Paused"* ]]; then
@@ -287,33 +469,38 @@ while true; do
       read -rp "Press Enter to continue..."
       ;;
 
-    "🔊  Toggle / Test unlock audio chime")
+    "🔊  Toggle / Test unlock audio chimes")
       echo
-      gum style --bold --foreground 212 "Unlock Audio Feedback Chime"
+      gum style --bold --foreground 212 "Unlock Audio Feedback Chimes"
       echo "Current status: $sound_status"
       echo
 
       sound_choice=$(gum choose \
-        "Enable audio chime" \
-        "Disable audio chime" \
-        "Test play chime now" \
+        "Enable audio chimes" \
+        "Disable audio chimes" \
+        "Test play Match Chime (success)" \
+        "Test play Negative Feedback (reject)" \
         "Back" || true)
 
       case "$sound_choice" in
-        "Enable audio chime")
+        "Enable audio chimes")
           echo "on" > "$SOUND_FILE"
           echo
-          gum style --foreground 82 "✓ Audio chime enabled."
+          gum style --foreground 82 "✓ Audio chimes enabled."
           pw-play "$CHIME_PATH" >/dev/null 2>&1 || true
           ;;
-        "Disable audio chime")
+        "Disable audio chimes")
           echo "off" > "$SOUND_FILE"
           echo
-          gum style --foreground 214 "✓ Audio chime disabled."
+          gum style --foreground 214 "✓ Audio chimes disabled."
           ;;
-        "Test play chime now")
-          echo "Playing sound..."
+        "Test play Match Chime (success)")
+          echo "Playing success chime..."
           pw-play "$CHIME_PATH" >/dev/null 2>&1 || true
+          ;;
+        "Test play Negative Feedback (reject)")
+          echo "Playing reject chime..."
+          pw-play "$REJECT_PATH" >/dev/null 2>&1 || true
           ;;
         *) ;;
       esac

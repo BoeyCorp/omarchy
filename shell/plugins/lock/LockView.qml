@@ -13,7 +13,9 @@ Item {
   property bool faceScanning: false
   property bool faceDelayActive: false
   property bool faceMatched: false
+  property bool faceRejected: false
   property bool facePaused: false
+  property bool lockdownMode: false
   property bool authenticatingPassword: false
   property string failureMessage: ""
   property int failedAttempts: 0
@@ -56,6 +58,10 @@ Item {
 
   function forcePasswordFocus() {
     passwordInput.forceActiveFocus()
+  }
+
+  function triggerHeadShake() {
+    headShakeAnim.restart()
   }
 
   function clearPassword() {
@@ -194,7 +200,21 @@ Item {
         color: Color.lock.background
         clip: true
         border.width: 2
-        border.color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : (root.errorState ? Color.lock.borderError : Color.lock.border))
+        border.color: root.faceMatched ? "#50fa7b" : (root.faceRejected ? Color.lock.borderError : (root.faceScanning ? Color.accent : (root.errorState ? Color.lock.borderError : Color.lock.border)))
+
+        transform: Translate {
+          id: badgeTranslate
+          x: 0
+        }
+
+        SequentialAnimation {
+          id: headShakeAnim
+          NumberAnimation { target: badgeTranslate; property: "x"; to: -10; duration: 55; easing.type: Easing.OutQuad }
+          NumberAnimation { target: badgeTranslate; property: "x"; to: 10; duration: 75; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: badgeTranslate; property: "x"; to: -7; duration: 65; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: badgeTranslate; property: "x"; to: 7; duration: 55; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: badgeTranslate; property: "x"; to: 0; duration: 45; easing.type: Easing.OutQuad }
+        }
 
         Behavior on border.color {
           ColorAnimation { duration: 250 }
@@ -209,11 +229,11 @@ Item {
           color: Color.accent
           opacity: 0.8
           anchors.horizontalCenter: parent.horizontalCenter
-          visible: root.faceScanning
+          visible: root.faceScanning && !root.lockdownMode
 
           SequentialAnimation {
             id: scanLaserAnim
-            running: root.faceScanning
+            running: root.faceScanning && !root.lockdownMode
             loops: Animation.Infinite
             NumberAnimation { target: scanLaser; property: "y"; from: 4; to: 58; duration: 900; easing.type: Easing.InOutQuad }
             NumberAnimation { target: scanLaser; property: "y"; from: 58; to: 4; duration: 900; easing.type: Easing.InOutQuad }
@@ -224,10 +244,10 @@ Item {
           id: faceIconText
           objectName: "faceIconText"
           anchors.centerIn: parent
-          text: root.faceMatched ? "󰄬" : "\uf118"
-          font.family: Style.font.family
+          text: root.lockdownMode ? "󰌾" : (root.faceMatched ? "󰄬" : (root.faceRejected ? "󰅙" : "\uf118"))
+          font.family: "JetBrainsMono Nerd Font"
           font.pixelSize: 28
-          color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : Color.lock.placeholder)
+          color: root.lockdownMode ? Color.lock.placeholder : (root.faceMatched ? "#50fa7b" : (root.faceRejected ? Color.lock.borderError : (root.faceScanning ? Color.accent : Color.lock.placeholder)))
 
           Behavior on color {
             ColorAnimation { duration: 200 }
@@ -235,7 +255,7 @@ Item {
 
           SequentialAnimation {
             id: breatheAnim
-            running: root.faceScanning
+            running: root.faceScanning && !root.lockdownMode
             loops: Animation.Infinite
             NumberAnimation { target: faceIconText; property: "scale"; from: 1.0; to: 1.12; duration: 700; easing.type: Easing.InOutQuad }
             NumberAnimation { target: faceIconText; property: "scale"; from: 1.12; to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
@@ -251,9 +271,11 @@ Item {
         anchors.horizontalCenter: faceBadge.horizontalCenter
         font.family: Style.font.family
         font.pixelSize: Math.round(Style.font.body * 0.85)
-        color: root.faceMatched ? "#50fa7b" : (root.faceScanning ? Color.accent : Color.lock.placeholder)
+        color: root.lockdownMode ? Color.lock.placeholder : (root.faceMatched ? "#50fa7b" : (root.faceRejected ? Color.lock.borderError : (root.faceScanning ? Color.accent : Color.lock.placeholder)))
         text: {
+          if (root.lockdownMode) return "Lockdown active — password required"
           if (root.faceMatched) return "Face recognized"
+          if (root.faceRejected) return "Face not recognized"
           if (root.faceScanning) return "Looking for you" + dotString
           if (root.faceDelayActive) return "Waiting to scan…"
           if (root.facePaused) return "Face scan paused — press Enter to scan"
@@ -265,7 +287,7 @@ Item {
         Timer {
           interval: 400
           repeat: true
-          running: root.faceScanning
+          running: root.faceScanning && !root.lockdownMode
           onTriggered: {
             if (faceStatusLabel.dotString === "…") faceStatusLabel.dotString = ""
             else if (faceStatusLabel.dotString === "") faceStatusLabel.dotString = "·"

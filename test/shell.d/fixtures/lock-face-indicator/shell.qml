@@ -77,6 +77,18 @@ ShellRoot {
           if (faceIcon) {
             root.assertTrue(faceIcon.text === "󰄬", "face icon switches to checkmark on match")
           }
+
+          view.faceMatched = false
+          view.faceRejected = true
+          if (faceIcon) {
+            root.assertTrue(faceIcon.text === "󰅙", "face icon switches to reject cross on failure")
+          }
+
+          view.faceRejected = false
+          view.lockdownMode = true
+          if (faceIcon) {
+            root.assertTrue(faceIcon.text === "󰌾", "face icon switches to lock icon in lockdown")
+          }
         }
 
         view.destroy()
