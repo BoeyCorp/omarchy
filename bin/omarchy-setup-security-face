@@ -1,0 +1,205 @@
+#!/bin/bash
+
+# omarchy:summary=Manage face unlock, enrolled models, and lock delay
+# omarchy:group=setup
+# omarchy:name=security-face
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+# Ensure gum styles match active Omarchy theme
+if command -v omarchy-restart-gum >/dev/null 2>&1; then
+  source omarchy-restart-gum
+fi
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
+DELAY_FILE="$CONFIG_DIR/face-unlock-delay"
+mkdir -p "$CONFIG_DIR"
+
+# Ensure Howdy is installed
+if ! command -v howdy >/dev/null 2>&1; then
+  gum style --foreground 196 "Error: 'howdy' command not found."
+  gum style --foreground 245 "Please install howdy-next from AUR first (yay -S howdy-next)."
+  exit 1
+fi
+
+# Authenticate sudo once up front
+echo -e "\033[1;34m::\033[0m Checking administrator permissions..."
+sudo -v
+
+get_current_delay() {
+  local delay=4
+  if [[ -f "$DELAY_FILE" ]]; then
+    local val
+    val=$(tr -d -c '0-9' < "$DELAY_FILE" 2>/dev/null || echo 4)
+    if [[ -n "$val" ]]; then
+      delay="$val"
+    fi
+  fi
+  echo "$delay"
+}
+
+get_enrolled_count() {
+  local count
+  count=$(sudo howdy list 2>/dev/null | awk '$1 ~ /^[0-9]+$/ { count++ } END { print count+0 }')
+  echo "$count"
+}
+
+while true; do
+  clear
+  current_delay=$(get_current_delay)
+  enrolled_count=$(get_enrolled_count)
+
+  gum style \
+    --border rounded \
+    --border-foreground 212 \
+    --padding "0 2" \
+    --margin "0 0 1 0" \
+    "  Face Unlock Management" \
+    "" \
+    "  • Enrolled Face Profiles:  $enrolled_count" \
+    "  • Lockscreen Grace Delay:  ${current_delay}s" \
+    "  • IR Camera Sensor:        /dev/video2"
+
+  choice=$(gum choose \
+    "➕  Enroll new face profile" \
+    "📋  List enrolled face profiles" \
+    "🗑️   Remove an enrolled face profile" \
+    "⏱️   Configure lockscreen delay" \
+    "👁️   Test camera feed (live preview)" \
+    "🔒  Preview lock screen animations" \
+    "🚪  Exit" || true)
+
+  case "$choice" in
+    "➕  Enroll new face profile")
+      echo
+      gum style --bold --foreground 212 "Enroll New Face Profile"
+      echo "Tip: Make sure your face is well-lit and facing the camera directly."
+      echo
+      label=$(gum input --placeholder "e.g. regular, glasses, dim-light" --prompt "Profile label: ") || true
+      if [[ -n "${label:-}" ]]; then
+        echo
+        echo "Starting enrollment for '$label'..."
+        sudo howdy add -y "$label" || sudo howdy add "$label"
+        echo
+        gum style --foreground 82 "✓ Profile '$label' enrolled successfully!"
+      else
+        gum style --foreground 245 "Enrollment cancelled."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "📋  List enrolled face profiles")
+      echo
+      gum style --bold --foreground 212 "Enrolled Face Profiles"
+      echo
+      sudo howdy list || true
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🗑️   Remove an enrolled face profile")
+      echo
+      gum style --bold --foreground 212 "Remove Face Profile"
+      echo
+
+      # Extract ID and label list
+      mapfile -t models < <(sudo howdy list 2>/dev/null | awk '$1 ~ /^[0-9]+$/ { print "ID " $1 " — " $NF }')
+
+      if (( ${#models[@]} == 0 )); then
+        gum style --foreground 214 "No enrolled face models found."
+        echo
+        read -rp "Press Enter to continue..."
+        continue
+      fi
+
+      models+=("Cancel")
+      picked=$(gum choose "${models[@]}" --header "Select a profile to remove:") || true
+
+      if [[ -n "${picked:-}" && "$picked" != "Cancel" ]]; then
+        model_id=$(echo "$picked" | awk '{print $2}')
+        if gum confirm "Are you sure you want to permanently delete profile ID $model_id?"; then
+          sudo howdy remove -y "$model_id" || sudo howdy remove "$model_id"
+          echo
+          gum style --foreground 82 "✓ Profile ID $model_id removed."
+        else
+          gum style --foreground 245 "Deletion cancelled."
+        fi
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "⏱️   Configure lockscreen delay")
+      echo
+      gum style --bold --foreground 212 "Configure Lockscreen Grace Delay"
+      echo "This delay prevents the camera from instantly re-unlocking when you press Super+Ctrl+L."
+      echo "Current delay: ${current_delay}s"
+      echo
+
+      delay_choice=$(gum choose \
+        "0s (Instant - scan immediately upon locking)" \
+        "2s (Quick)" \
+        "3s" \
+        "4s (Recommended Default)" \
+        "5s (Relaxed)" \
+        "Custom seconds..." \
+        "Keep current (${current_delay}s)" || true)
+
+      new_val=""
+      case "$delay_choice" in
+        "0s"*) new_val=0 ;;
+        "2s"*) new_val=2 ;;
+        "3s"*) new_val=3 ;;
+        "4s"*) new_val=4 ;;
+        "5s"*) new_val=5 ;;
+        "Custom"*)
+          custom_input=$(gum input --placeholder "Number of seconds (e.g. 4)" --prompt "Delay in seconds: ") || true
+          if [[ "$custom_input" =~ ^[0-9]+$ ]]; then
+            new_val="$custom_input"
+          else
+            gum style --foreground 196 "Invalid number. Keeping current setting."
+          fi
+          ;;
+        *) ;;
+      esac
+
+      if [[ -n "$new_val" ]]; then
+        echo "$new_val" > "$DELAY_FILE"
+        echo
+        gum style --foreground 82 "✓ Lockscreen delay updated to ${new_val}s."
+        echo "This setting takes effect immediately on your next lock."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "👁️   Test camera feed (live preview)")
+      echo
+      gum style --bold --foreground 212 "Testing Camera Stream"
+      echo "A preview window will open with face tracking boxes."
+      echo "Press 'q' or 'Esc' in the camera window when finished."
+      echo
+      sudo howdy test || true
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+
+    "🔒  Preview lock screen animations")
+      echo
+      gum style --bold --foreground 212 "Launching Lock Screen Preview"
+      echo "Testing lock screen UI and face scanning animations..."
+      echo "Click anywhere or press Esc to exit the preview."
+      echo
+      omarchy-shell lock preview || true
+      ;;
+
+    "🚪  Exit"|*)
+      break
+      ;;
+  esac
+done
+
+echo
+gum style --foreground 82 "Done!"
