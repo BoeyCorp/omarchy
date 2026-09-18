@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# omarchy:summary=Reconcile displays and wake lock screen when the laptop lid opens
+# omarchy:group=system
+# omarchy:hidden=true
+
+omarchy-hyprland-monitor-clamshell
+
+# Wake the lock screen and trigger face scan if locked
+omarchy-shell lock wake >/dev/null 2>&1 || true

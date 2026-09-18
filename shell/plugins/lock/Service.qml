@@ -205,11 +205,18 @@ Item {
     idleBlankTimer.restart()
   }
 
+  function checkLidState() {
+    if (!laptopClosedProc.running) laptopClosedProc.running = true
+  }
+
   function runWake() {
     root.displaysBlank = false
     root.monitorDpmsKnown = false
     if (!wakeProcess.running) wakeProcess.running = true
-    if (lockRequested) armBlankTimer()
+    if (lockRequested) {
+      armBlankTimer()
+      checkLidState()
+    }
   }
 
   function runBlank() {
@@ -326,13 +333,22 @@ Item {
   }
 
   function requestFaceRescan() {
-    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || laptopClosed || lockdownMode) return
+    if (!lockRequested || !sessionLock.secure || (!fingerprintConfigured && !faceConfigured) || lockdownMode) return
+
+    logEvent("rescan-requested: manual-trigger")
+    runWake()
     faceAttemptCount = 0
     faceDelayActive = false
     faceRejected = false
     faceRejectTimer.stop()
-    if (!laptopClosedProc.running) laptopClosedProc.running = true
-    startFingerprint()
+    laptopClosed = false
+
+    if (fingerprintPam.active) {
+      fingerprintPam.abort()
+      fingerprintRetryTimer.restart()
+    } else {
+      startFingerprint()
+    }
   }
 
   WlSessionLock {
@@ -484,7 +500,7 @@ Item {
 
     onError: function(error) {
       root.fingerprintAuthenticating = false
-      if (root.lockRequested && root.fingerprintConfigured) fingerprintRetryTimer.restart()
+      if (root.lockRequested && (root.fingerprintConfigured || root.faceConfigured)) fingerprintRetryTimer.restart()
     }
   }
 
@@ -535,7 +551,27 @@ Item {
       waitForEnd: true
     }
     onExited: {
-      root.laptopClosed = String(laptopClosedStdout.text || "").trim() === "closed"
+      var isClosed = String(laptopClosedStdout.text || "").trim() === "closed"
+      var wasClosed = root.laptopClosed
+      root.laptopClosed = isClosed
+
+      if (isClosed && fingerprintPam.active) {
+        root.logEvent("lid-closed: aborting-biometrics")
+        fingerprintPam.abort()
+        initialFaceDelayTimer.stop()
+      } else if (wasClosed && !isClosed && root.lockRequested && (root.fingerprintConfigured || root.faceConfigured) && !root.lockdownMode) {
+        root.logEvent("lid-opened: resuming-face-scan")
+        root.faceAttemptCount = 0
+        root.faceDelayActive = false
+        root.faceRejected = false
+        root.faceRejectTimer.stop()
+        if (fingerprintPam.active) {
+          fingerprintPam.abort()
+          fingerprintRetryTimer.restart()
+        } else {
+          root.startFingerprint()
+        }
+      }
     }
   }
 
@@ -698,6 +734,33 @@ Item {
     }
   }
 
+  Timer {
+    id: lidWatchTimer
+    interval: 1000
+    repeat: true
+    running: root.locked && !root.lockdownMode
+    property double lastTick: Date.now()
+
+    onTriggered: {
+      var now = Date.now()
+      var elapsed = now - lastTick
+      lastTick = now
+
+      // Detect wake from system suspend/sleep (gap in wall-clock time)
+      if (elapsed > 2500) {
+        root.logEvent("system-resumed-from-sleep: elapsed=" + elapsed)
+        root.runWake()
+        root.faceAttemptCount = 0
+        root.faceDelayActive = false
+        root.faceRejected = false
+        root.faceRejectTimer.stop()
+        if (fingerprintPam.active) fingerprintPam.abort()
+      }
+
+      root.checkLidState()
+    }
+  }
+
   Connections {
     target: Quickshell
     function onScreensChanged() {
@@ -710,6 +773,7 @@ Item {
       // A monitor still coming up has no workspace, so cannot answer yet.
       strandedLockRetryTimer.rearm()
       root.checkStrandedLock()
+      if (root.lockRequested) root.checkLidState()
     }
   }
 
@@ -743,6 +807,7 @@ Item {
     refreshBackground()
     refreshFingerprintStatus()
     checkStrandedLock()
+    delayReadProc.running = true
   }
 
   IpcHandler {
@@ -758,6 +823,18 @@ Item {
       if (!root.passwordPamConfigured) return "missing-pam"
       root.lockdownMode = true
       if (!root.locked && !root.beginLock()) return "failed"
+      return "ok"
+    }
+
+    function wake(): string {
+      root.runWake()
+      root.checkLidState()
+      return "ok"
+    }
+
+    function rescan(): string {
+      root.runWake()
+      root.requestFaceRescan()
       return "ok"
     }
 
