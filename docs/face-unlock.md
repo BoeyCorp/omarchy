@@ -117,10 +117,10 @@ To prevent battery depletion if you walk away from your desk while the lock scre
 * The screen displays: *"Face scan paused — press Enter to scan"*.
 * Pressing an empty <kbd>Enter</kbd> immediately wakes the camera with 0ms grace delay to scan your face.
 
-### 4. Clamshell Mode Protection
-When connected to an external monitor and the laptop lid is closed:
-* `omarchy-hw-laptop-closed` detects the closed lid state.
-* Quickshell and PAM suppress camera initialization completely, preventing unnecessary heat generation inside the closed chassis.
+### 4. Clamshell Mode & Lid Open Auto-Resume
+* **Lid Close:** When the laptop lid closes, `switch:on:Lid Switch` runs `omarchy-system-lid-close`. `Service.qml` aborts any active face scan and suppresses camera activity to avoid heating the closed chassis.
+* **Lid Open:** When the laptop lid is opened, `switch:off:Lid Switch` triggers `omarchy-system-lid-open`. Quickshell detects the transition from closed to open, resets attempt counters, skips the grace countdown, and immediately powers on the IR camera to authenticate you hands-free.
+* **Manual Re-scan:** Pressing an empty <kbd>Enter</kbd> at any time immediately clears any pause state and initiates a fresh face scan.
 
 ---
 
